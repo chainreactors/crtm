@@ -23,15 +23,9 @@ builds:
     - goos: windows
       goarch: 'arm64'
 
-  binary: '{{ .ProjectName }}'
+  binary: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
   main: cmd/{{ .ProjectName }}/{{ .ProjectName }}.go
   ldflags: "-s -w"
-  flags:
-    - -trimpath
-  asmflags:
-    - all=-trimpath={{.Env.GOPATH}}
-  gcflags:
-    - all=-trimpath={{.Env.GOPATH}}
 
 archives:
   -
