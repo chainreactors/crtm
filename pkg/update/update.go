@@ -21,7 +21,6 @@ import (
 
 const (
 	Organization = "chainreactors"
-	//UpdateCheckEndpoint = "https://api.pdtm.sh/api/v1/tools/%v"
 )
 
 var (
@@ -125,8 +124,8 @@ func GetToolVersionCallback(toolName, version string) func() (string, error) {
 	}
 }
 
-// GetpdtmParams returns encoded query parameters sent to update check endpoint
-func GetpdtmParams(version string) string {
+// GetcrtmParams returns encoded query parameters sent to update check endpoint
+func GetcrtmParams(version string) string {
 	params := &url.Values{}
 	params.Add("os", runtime.GOOS)
 	params.Add("arch", runtime.GOARCH)
@@ -137,7 +136,7 @@ func GetpdtmParams(version string) string {
 }
 
 func buildMachineId() string {
-	machineId, err := machineid.ProtectedID("pdtm")
+	machineId, err := machineid.ProtectedID("crtm")
 	if err != nil {
 		return "unknown"
 	}

@@ -1,4 +1,4 @@
-**fork from https://github.com/projectdiscovery/crtm**
+**fork from https://github.com/projectdiscovery/pdtm**
 
 ## Intro
 
