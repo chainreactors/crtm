@@ -1,45 +1,37 @@
-<h1 align="center">
-<img src="https://user-images.githubusercontent.com/8293321/211602034-411e38e9-e5df-429e-89ee-a97e3e09ebf0.png" width="200px">
-<br>
-</h1>
+**fork from https://github.com/projectdiscovery/crtm**
 
-<h4 align="center">ProjectDiscovery's Open Source Tool Manager</h4>
+## Intro
+
+<h4 align="center">Chainreactors's Open Source Tool Manager</h4>
 
 <p align="center">
 <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-_red.svg"></a>
-<a href="https://goreportcard.com/badge/github.com/projectdiscovery/pdtm"><img src="https://goreportcard.com/badge/github.com/projectdiscovery/pdtm"></a>
-<a href="https://github.com/projectdiscovery/pdtm/releases"><img src="https://img.shields.io/github/release/projectdiscovery/pdtm"></a>
-<a href="https://twitter.com/pdiscoveryio"><img src="https://img.shields.io/twitter/follow/pdiscoveryio.svg?logo=twitter"></a>
-<a href="https://discord.gg/projectdiscovery"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a>
+<a href="https://github.com/chainreactors/crtm/releases"><img src="https://img.shields.io/github/release/chainreactors/crtm"></a>
 </p>
 
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
-  <a href="#running-pdtm">Running pdtm</a> •
-  <a href="https://discord.gg/projectdiscovery">Join Discord</a>
+  <a href="#running-crtm">Running crtm</a> •
 
-**pdtm** is a simple and easy-to-use golang based tool for managing open source projects from ProjectDiscovery.
+**crtm** is a simple and easy-to-use golang based tool for managing open source projects from Chainreactors.
 
 </p>
 
-<h1 align="center">
-<img src="https://user-images.githubusercontent.com/8293321/212781914-bae85495-5a7b-40d7-9e05-964a8edf3b61.png" width="700px">
-</h1>
 
 ## Installation
 
 
-**`pdtm`** requires **go1.19** to install successfully. Run the following command to install the latest version:
+**`crtm`** requires **go1.19** to install successfully. Run the following command to install the latest version:
 
 1. Install using go install -
 
 ```sh
-go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
+go install -v github.com/chainreactors/crtm/cmd/crtm@latest
 ```
 
-2. Install by downloading binary from https://github.com/projectdiscovery/pdtm/releases
+2. Install by downloading binary from https://github.com/chainreactors/crtm/releases
 
 <table>
 <tr>
@@ -48,7 +40,7 @@ go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
 > **Notes**:
 
 > - *Currently, projects are installed by downloading the released project binary. This means that projects can only be installed on the platforms for which binaries have been published.*
-> - *The path $HOME/.pdtm/go/bin is added to the $PATH variable by default*
+> - *The path $HOME/.crtm/go/bin is added to the $PATH variable by default*
 
 </table>
 </tr>
@@ -58,15 +50,15 @@ go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
 
 
 ```console
-pdtm is a simple and easy-to-use golang based tool for managing open source projects from ProjectDiscovery
+crtm is a simple and easy-to-use golang based tool for managing open source projects from ProjectDiscovery
 
 Usage:
-  ./pdtm [flags]
+  ./crtm [flags]
 
 Flags:
 CONFIG:
-   -config string            cli flag configuration file (default "$HOME/.config/pdtm/config.yaml")
-   -bp, -binary-path string  custom location to download project binary (default "$HOME/.pdtm/go/bin")
+   -config string            cli flag configuration file (default "$HOME/.config/crtm/config.yaml")
+   -bp, -binary-path string  custom location to download project binary (default "$HOME/.crtm/go/bin")
 
 INSTALL:
    -i, -install string[]  install single or multiple project by name (comma separated)
@@ -76,8 +68,8 @@ INSTALL:
 UPDATE:
    -u, -update string[]         update single or multiple project by name (comma separated)
    -ua, -update-all             update all the projects
-   -up, -self-update            update pdtm to latest version
-   -duc, -disable-update-check  disable automatic pdtm update check
+   -up, -self-update            update crtm to latest version
+   -duc, -disable-update-check  disable automatic crtm update check
 
 REMOVE:
    -r, -remove string[]  remove single or multiple project by name (comma separated)
@@ -92,37 +84,19 @@ DEBUG:
    -disable-changelog, -dc  disable release changelog in output
 ```
 
-## Running pdtm
+## Running crtm
 
 ```console
-$ pdtm -install-all
-                ____          
-     ____  ____/ / /_____ ___ 
-    / __ \/ __  / __/ __ __  \
-   / /_/ / /_/ / /_/ / / / / /
-  / .___/\__,_/\__/_/ /_/ /_/ 
- /_/                          v0.0.1
-
-      projectdiscovery.io
-
-[INF] Installed httpx v1.1.1
-[INF] Installed nuclei v2.6.3
-[INF] Installed naabu v2.6.3
-[INF] Installed dnsx v2.6.3
+$ crtm -install-all
+[INF] Current crtm version v0.0.1
+[INF] installing gogo...
+[INF] installed gogo v2.13.2 (latest)
+[INF] installing spray...
+[INF] installed spray v0.9.9 (latest)
+[INF] installing zombie...
+[INF] installed zombie v1.2.0 (latest)
 ``` 
 
-### Todo
+## Thanks
 
-- support for go setup + project install from source
-- support for installing from source as fallback option
-
---------
-
-<div align="center">
-
-**pdtm** is made with ❤️ by the [projectdiscovery](https://projectdiscovery.io) team and distributed under [MIT License](LICENSE).
-
-
-<a href="https://discord.gg/projectdiscovery"><img src="https://raw.githubusercontent.com/projectdiscovery/nuclei-burp-plugin/main/static/join-discord.png" width="300" alt="Join Discord"></a>
-
-</div>
+* https://github.com/projectdiscovery/pdtm ,  crtm modified from pdtm, thanks to pdtm's work
