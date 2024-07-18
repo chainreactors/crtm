@@ -25,10 +25,18 @@ builds:
 
   binary: '{{ .ProjectName }}'
   main: cmd/{{ .ProjectName }}/{{ .ProjectName }}.go
+  ldflags: "-s -w"
+  flags:
+    - -trimpath
+  asmflags:
+    - all=-trimpath={{.Env.GOPATH}}
+  gcflags:
+    - all=-trimpath={{.Env.GOPATH}}
 
 archives:
-- format: binary
-  name_template: '{{ .ProjectName }}_{{ .Version }}_{{ if eq .Os "darwin" }}macOS{{ else }}{{ .Os }}{{ end }}_{{ .Arch }}'
+  -
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format: binary
 
 checksum:
   algorithm: sha256
