@@ -3,3 +3,4 @@ dist/
 .idea
 .vscode
 .devcontainer
+/bin

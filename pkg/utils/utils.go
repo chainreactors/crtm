@@ -17,15 +17,18 @@ var (
 	GOGORepo       = "gogo"
 	SprayRepo      = "spray"
 	ZombieRepo     = "zombie"
+	IoMRepo        = "malice-network"
 	UrlFounderRepo = "urlfounder"
 	CDNCheckRepo   = "cdncheck"
 
 	Tools = map[string]string{
 		//"crtm":       CRTMRepo,
-		"gogo":       GOGORepo,
-		"spray":      SprayRepo,
-		"zombie":     ZombieRepo,
-		"urlfounder": UrlFounderRepo,
+		"gogo":           GOGORepo,
+		"spray":          SprayRepo,
+		"zombie":         ZombieRepo,
+		"urlfounder":     UrlFounderRepo,
+		"iom":            IoMRepo,
+		"malice-network": IoMRepo,
 		//"cdncheck_cn": CDNCheckRepo,
 	}
 )
