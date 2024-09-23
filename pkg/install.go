@@ -65,19 +65,19 @@ loop:
 	for asset, assetID := range tool.Assets {
 		switch {
 		case strings.Contains(asset, ".zip"):
-			if isAsset(asset, tool.Repo, runtime.GOOS, runtime.GOARCH) {
+			if isAsset(asset, tool.Name, runtime.GOOS, runtime.GOARCH) {
 				id = assetID
 				isZip = true
 				break loop
 			}
 		case strings.Contains(asset, ".tar.gz"):
-			if isAsset(asset, tool.Repo, runtime.GOOS, runtime.GOARCH) {
+			if isAsset(asset, tool.Name, runtime.GOOS, runtime.GOARCH) {
 				id = assetID
 				isTar = true
 				break loop
 			}
 		default:
-			if isAsset(asset, tool.Repo, runtime.GOOS, runtime.GOARCH) {
+			if isAsset(asset, tool.Name, runtime.GOOS, runtime.GOARCH) {
 				id = assetID
 				break loop
 			}
@@ -129,7 +129,7 @@ loop:
 }
 
 func isAsset(asset, name, os, arch string) bool {
-	if strings.Contains(asset, name) && strings.Contains(asset, os+"_") && strings.Contains(asset, arch) {
+	if strings.Contains(asset, name) && strings.Contains(asset, os) && strings.Contains(asset, arch) {
 		return true
 	}
 	return false

@@ -28,7 +28,7 @@ var (
 		"zombie":         ZombieRepo,
 		"urlfounder":     UrlFounderRepo,
 		"iom":            IoMRepo,
-		"malice-network": IoMRepo,
+		"malice_network": IoMRepo,
 		//"cdncheck_cn": CDNCheckRepo,
 	}
 )
