@@ -156,7 +156,13 @@ func (m *Manager) downloadAndInstall(entry registry.ToolEntry, version string) (
 	if resolved != "" {
 		return resolved, nil
 	}
-	return "latest", nil
+
+	// For tools that don't use {version} in the pattern (e.g. CR tools),
+	// resolve the actual version from the latest release tag.
+	if ver, err := ResolveLatestVersion(entry.Repo); err == nil && ver != "" {
+		return ver, nil
+	}
+	return "unknown", nil
 }
 
 func (m *Manager) isInstalled(name string) bool {
