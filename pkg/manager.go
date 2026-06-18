@@ -142,27 +142,35 @@ func (m *Manager) InstalledVersion(name string) string {
 // BinPath returns the binary installation directory.
 func (m *Manager) BinPath() string { return m.binPath }
 
-// downloadAndInstall wraps DownloadAndInstall and captures the resolved version.
+// downloadAndInstall downloads and installs the tool, then resolves
+// the actual installed version from the git release tag (not filename).
 func (m *Manager) downloadAndInstall(entry registry.ToolEntry, version string) (string, error) {
-	resolved, err := ResolveVersionIfNeeded(entry, version)
+	// If version provided, use it for both download and manifest.
+	if version != "" {
+		if err := DownloadAndInstall(entry, version, m.binPath); err != nil {
+			return "", err
+		}
+		return version, nil
+	}
+
+	// Resolve version from git tag before download — this is the
+	// single source of truth for version, regardless of asset naming.
+	resolved, err := ResolveLatestVersion(entry.Repo)
 	if err != nil {
-		return "", err
+		// Fallback: download with empty version (uses /releases/latest/download/).
+		if dlErr := DownloadAndInstall(entry, "", m.binPath); dlErr != nil {
+			return "", dlErr
+		}
+		return "unknown", nil
 	}
 
 	if err := DownloadAndInstall(entry, resolved, m.binPath); err != nil {
-		return "", err
+		// Version-specific URL failed, retry with latest direct link.
+		if dlErr := DownloadAndInstall(entry, "", m.binPath); dlErr != nil {
+			return "", dlErr
+		}
 	}
-
-	if resolved != "" {
-		return resolved, nil
-	}
-
-	// For tools that don't use {version} in the pattern (e.g. CR tools),
-	// resolve the actual version from the latest release tag.
-	if ver, err := ResolveLatestVersion(entry.Repo); err == nil && ver != "" {
-		return ver, nil
-	}
-	return "unknown", nil
+	return resolved, nil
 }
 
 func (m *Manager) isInstalled(name string) bool {
