@@ -16,11 +16,13 @@ var embedded embed.FS
 // No version — version is resolved lazily at install time.
 type ToolEntry struct {
 	Name         string   `yaml:"name" json:"name"`
-	Repo         string   `yaml:"repo" json:"repo"`               // "org/repo" format
-	AssetPattern string   `yaml:"asset_pattern" json:"asset_pattern"` // e.g. "{name}_{version}_{os}_{arch}.zip"
+	Repo         string   `yaml:"repo" json:"repo"`
+	AssetPattern string   `yaml:"asset_pattern" json:"asset_pattern"`
 	Description  string   `yaml:"description,omitempty" json:"description,omitempty"`
 	Tags         []string `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Category     string   `yaml:"category,omitempty" json:"category,omitempty"`
+	DocsURL      string   `yaml:"docs_url,omitempty" json:"docs_url,omitempty"`
+	Hint         string   `yaml:"hint,omitempty" json:"hint,omitempty"`
 }
 
 // Org returns the GitHub organization from the Repo field.

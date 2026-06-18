@@ -4,6 +4,8 @@
   description: "Host, port, service and banner discovery"
   tags: [port, service, scanner, discovery, network]
   category: scanner
+  docs_url: https://chainreactors.github.io/wiki/gogo/
+  hint: "Built-in as pseudo-command. Use `gogo` via bash directly — no install needed unless you want a standalone binary."
 
 - name: spray
   repo: chainreactors/spray
@@ -11,6 +13,8 @@
   description: "Web probing, HTTP fingerprints, common files and crawl"
   tags: [web, http, fingerprint, probe]
   category: scanner
+  docs_url: https://chainreactors.github.io/wiki/spray/
+  hint: "Built-in as pseudo-command. Use `spray` via bash directly."
 
 - name: zombie
   repo: chainreactors/zombie
@@ -18,6 +22,8 @@
   description: "Weak credential checks for network services"
   tags: [credential, bruteforce, weak-password]
   category: exploit
+  docs_url: https://chainreactors.github.io/wiki/zombie/
+  hint: "Built-in as pseudo-command. Use `zombie` via bash directly."
 
 - name: iom
   repo: chainreactors/malice-network
@@ -25,6 +31,7 @@
   description: "Malice-network implant/operator framework"
   tags: [c2, implant, post-exploitation]
   category: c2
+  docs_url: https://chainreactors.github.io/wiki/IoM/
 
 - name: urlfounder
   repo: chainreactors/urlfounder
@@ -32,3 +39,4 @@
   description: "URL discovery from various sources"
   tags: [url, discovery, crawler, recon]
   category: recon
+  docs_url: https://chainreactors.github.io/wiki/urlfounder/

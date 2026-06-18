@@ -4,6 +4,8 @@
   description: "Fast vulnerability scanner with 9000+ community templates"
   tags: [poc, template, cve, vulnerability, scanner]
   category: scanner
+  docs_url: https://docs.projectdiscovery.io/tools/nuclei/overview
+  hint: "Run `nuclei -update-templates` after first install to fetch template library."
 
 - name: httpx
   repo: projectdiscovery/httpx
@@ -11,6 +13,7 @@
   description: "Fast HTTP toolkit with tech detection and probing"
   tags: [http, web, probe, tech-detect]
   category: scanner
+  docs_url: https://docs.projectdiscovery.io/tools/httpx/overview
 
 - name: subfinder
   repo: projectdiscovery/subfinder
@@ -18,6 +21,8 @@
   description: "Fast passive subdomain discovery tool"
   tags: [subdomain, recon, discovery, passive]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/subfinder/overview
+  hint: "Configure API keys in ~/.config/subfinder/provider-config.yaml for better results."
 
 - name: dnsx
   repo: projectdiscovery/dnsx
@@ -25,6 +30,7 @@
   description: "Fast DNS toolkit for running multiple probes"
   tags: [dns, resolver, lookup]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/dnsx/overview
 
 - name: naabu
   repo: projectdiscovery/naabu
@@ -32,6 +38,8 @@
   description: "Fast port scanner written in Go"
   tags: [port, scanner, network]
   category: scanner
+  docs_url: https://docs.projectdiscovery.io/tools/naabu/overview
+  hint: "Requires libpcap. On Debian/Ubuntu: apt install -y libpcap-dev"
 
 - name: katana
   repo: projectdiscovery/katana
@@ -39,6 +47,7 @@
   description: "Next-generation web crawling and spidering framework"
   tags: [crawler, spider, web, recon]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/katana/overview
 
 - name: uncover
   repo: projectdiscovery/uncover
@@ -46,6 +55,8 @@
   description: "Search across Shodan, Censys, FOFA, Hunter and more"
   tags: [search, shodan, fofa, hunter, censys]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/uncover/overview
+  hint: "Requires API keys. Configure in ~/.config/uncover/provider-config.yaml"
 
 - name: notify
   repo: projectdiscovery/notify
@@ -53,6 +64,7 @@
   description: "Stream tool output to multiple notification platforms"
   tags: [notification, slack, discord, telegram]
   category: utility
+  docs_url: https://docs.projectdiscovery.io/tools/notify/overview
 
 - name: interactsh-client
   repo: projectdiscovery/interactsh
@@ -60,6 +72,7 @@
   description: "OOB interaction gathering server and client"
   tags: [oob, interaction, callback, dns]
   category: utility
+  docs_url: https://docs.projectdiscovery.io/tools/interactsh/overview
 
 - name: mapcidr
   repo: projectdiscovery/mapcidr
@@ -67,6 +80,7 @@
   description: "CIDR/subnet manipulation and processing utility"
   tags: [cidr, subnet, network, utility]
   category: utility
+  docs_url: https://docs.projectdiscovery.io/tools/mapcidr/overview
 
 - name: tlsx
   repo: projectdiscovery/tlsx
@@ -74,6 +88,7 @@
   description: "Fast TLS grabber with rich certificate analysis"
   tags: [tls, ssl, certificate]
   category: scanner
+  docs_url: https://docs.projectdiscovery.io/tools/tlsx/overview
 
 - name: asnmap
   repo: projectdiscovery/asnmap
@@ -81,6 +96,7 @@
   description: "Quickly map organization network ranges using ASN information"
   tags: [asn, network, mapping]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/asnmap/overview
 
 - name: proxify
   repo: projectdiscovery/proxify
@@ -88,6 +104,7 @@
   description: "Swiss army knife proxy tool for HTTP/HTTPS traffic capture"
   tags: [proxy, http, capture]
   category: utility
+  docs_url: https://docs.projectdiscovery.io/tools/proxify/overview
 
 - name: shuffledns
   repo: projectdiscovery/shuffledns
@@ -95,6 +112,8 @@
   description: "Wrapper around massdns for active bruteforcing"
   tags: [dns, bruteforce, subdomain]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/shuffledns/overview
+  hint: "Requires massdns. Install from https://github.com/blechschmidt/massdns"
 
 - name: cloudlist
   repo: projectdiscovery/cloudlist
@@ -102,6 +121,7 @@
   description: "Multi-cloud assets discovery tool"
   tags: [cloud, aws, gcp, azure, recon]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/cloudlist/overview
 
 - name: alterx
   repo: projectdiscovery/alterx
@@ -109,6 +129,7 @@
   description: "Fast and customizable subdomain wordlist generator"
   tags: [subdomain, wordlist, permutation]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/alterx/overview
 
 - name: urlfinder
   repo: projectdiscovery/urlfinder
@@ -116,3 +137,4 @@
   description: "Find URLs from websites using passive sources"
   tags: [url, discovery, passive]
   category: recon
+  docs_url: https://docs.projectdiscovery.io/tools/urlfinder/overview
