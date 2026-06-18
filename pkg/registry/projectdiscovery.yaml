@@ -1,0 +1,118 @@
+- name: nuclei
+  repo: projectdiscovery/nuclei
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Fast vulnerability scanner with 9000+ community templates"
+  tags: [poc, template, cve, vulnerability, scanner]
+  category: scanner
+
+- name: httpx
+  repo: projectdiscovery/httpx
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Fast HTTP toolkit with tech detection and probing"
+  tags: [http, web, probe, tech-detect]
+  category: scanner
+
+- name: subfinder
+  repo: projectdiscovery/subfinder
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Fast passive subdomain discovery tool"
+  tags: [subdomain, recon, discovery, passive]
+  category: recon
+
+- name: dnsx
+  repo: projectdiscovery/dnsx
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Fast DNS toolkit for running multiple probes"
+  tags: [dns, resolver, lookup]
+  category: recon
+
+- name: naabu
+  repo: projectdiscovery/naabu
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Fast port scanner written in Go"
+  tags: [port, scanner, network]
+  category: scanner
+
+- name: katana
+  repo: projectdiscovery/katana
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Next-generation web crawling and spidering framework"
+  tags: [crawler, spider, web, recon]
+  category: recon
+
+- name: uncover
+  repo: projectdiscovery/uncover
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Search across Shodan, Censys, FOFA, Hunter and more"
+  tags: [search, shodan, fofa, hunter, censys]
+  category: recon
+
+- name: notify
+  repo: projectdiscovery/notify
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Stream tool output to multiple notification platforms"
+  tags: [notification, slack, discord, telegram]
+  category: utility
+
+- name: interactsh-client
+  repo: projectdiscovery/interactsh
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "OOB interaction gathering server and client"
+  tags: [oob, interaction, callback, dns]
+  category: utility
+
+- name: mapcidr
+  repo: projectdiscovery/mapcidr
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "CIDR/subnet manipulation and processing utility"
+  tags: [cidr, subnet, network, utility]
+  category: utility
+
+- name: tlsx
+  repo: projectdiscovery/tlsx
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Fast TLS grabber with rich certificate analysis"
+  tags: [tls, ssl, certificate]
+  category: scanner
+
+- name: asnmap
+  repo: projectdiscovery/asnmap
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Quickly map organization network ranges using ASN information"
+  tags: [asn, network, mapping]
+  category: recon
+
+- name: proxify
+  repo: projectdiscovery/proxify
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Swiss army knife proxy tool for HTTP/HTTPS traffic capture"
+  tags: [proxy, http, capture]
+  category: utility
+
+- name: shuffledns
+  repo: projectdiscovery/shuffledns
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Wrapper around massdns for active bruteforcing"
+  tags: [dns, bruteforce, subdomain]
+  category: recon
+
+- name: cloudlist
+  repo: projectdiscovery/cloudlist
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Multi-cloud assets discovery tool"
+  tags: [cloud, aws, gcp, azure, recon]
+  category: recon
+
+- name: alterx
+  repo: projectdiscovery/alterx
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Fast and customizable subdomain wordlist generator"
+  tags: [subdomain, wordlist, permutation]
+  category: recon
+
+- name: urlfinder
+  repo: projectdiscovery/urlfinder
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
+  description: "Find URLs from websites using passive sources"
+  tags: [url, discovery, passive]
+  category: recon

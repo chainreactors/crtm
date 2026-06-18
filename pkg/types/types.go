@@ -20,6 +20,21 @@ type Tool struct {
 	Requirements  []ToolRequirement `json:"requirements"`
 	Assets        map[string]int64  `json:"assets"`
 	InstallType   InstallType       `json:"install_type" yaml:"install_type"`
+
+	Org         string   `json:"org,omitempty" yaml:"org,omitempty"`
+	Source      string   `json:"source,omitempty" yaml:"source,omitempty"`
+	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Category    string   `json:"category,omitempty" yaml:"category,omitempty"`
+}
+
+// GetOrg returns the tool's GitHub organization, defaulting to the
+// chainreactors constant when not explicitly set.
+func (t Tool) GetOrg() string {
+	if t.Org != "" {
+		return t.Org
+	}
+	return Organization
 }
 
 type InstallType string

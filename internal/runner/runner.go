@@ -17,7 +17,6 @@ import (
 	"github.com/projectdiscovery/gologger"
 	errorutil "github.com/projectdiscovery/utils/errors"
 	osutils "github.com/projectdiscovery/utils/os"
-	stringsutil "github.com/projectdiscovery/utils/strings"
 	"github.com/projectdiscovery/utils/syscallutil"
 )
 
@@ -58,17 +57,19 @@ func (r *Runner) Run() error {
 	if err != nil {
 		return err
 	}
-	toolListApi, err := utils.FetchToolList()
-	var toolList []types.Tool
-
-	for _, tool := range toolListApi {
-		if !stringsutil.ContainsAny(tool.Name, excludedToolList...) {
-			toolList = append(toolList, tool)
-		}
+	mgr, mgrErr := pkg.NewManager(pkg.ManagerOption{
+		BinPath:    r.options.Path,
+		ConfigPath: r.options.ConfigFile,
+	})
+	if mgrErr != nil {
+		return mgrErr
+	}
+	if err := mgr.Refresh(); err != nil {
+		gologger.Warning().Msgf("refresh sources: %v", err)
 	}
 
-	// if toolList is not nil save/update the cache
-	// else fetch from cache file
+	toolList := mgr.ListTools()
+
 	if toolList != nil {
 		go func() {
 			if err := UpdateCache(toolList); err != nil {
@@ -76,16 +77,54 @@ func (r *Runner) Run() error {
 			}
 		}()
 	} else {
-		toolList, err = FetchFromCache()
-		if err != nil {
-			return errors.New("github api is down, please try again later")
+		var cacheErr error
+		toolList, cacheErr = FetchFromCache()
+		if cacheErr != nil {
+			return errors.New("failed to fetch tools from any source, and cache is unavailable")
 		}
 		if toolList != nil {
-			gologger.Warning().Msg("github api is down, using cached information while we fix the issue \n\n")
+			gologger.Warning().Msg("using cached tool list\n\n")
+			mgr = nil
 		}
 	}
-	if toolList == nil && err != nil {
-		return err
+
+	// Handle search command
+	if len(r.options.Search) > 0 && mgr != nil {
+		for _, query := range r.options.Search {
+			results := mgr.Search(query)
+			if len(results) == 0 {
+				gologger.Info().Msgf("no tools found for %q", query)
+				continue
+			}
+			for i, t := range results {
+				source := t.Source
+				if source == "" {
+					source = t.GetOrg()
+				}
+				desc := t.Description
+				if desc == "" && len(t.Tags) > 0 {
+					desc = strings.Join(t.Tags, ", ")
+				}
+				msg := utils.InstalledVersion(t, r.options.Path, au)
+				fmt.Printf("%d. [%s] %s %s %s\n", i+1, source, t.Name, msg, desc)
+			}
+		}
+		return nil
+	}
+
+	// Handle add command
+	if r.options.AddTool != "" {
+		entry := pkg.CustomToolEntry{Repo: r.options.AddTool}
+		added, addErr := pkg.AddCustomTool(r.options.ConfigFile, entry)
+		if addErr != nil {
+			return addErr
+		}
+		if added {
+			gologger.Info().Msgf("added %s to custom tools", entry.ToolName())
+		} else {
+			gologger.Info().Msgf("%s already registered", entry.Repo)
+		}
+		return nil
 	}
 
 	switch {
@@ -104,30 +143,27 @@ func (r *Runner) Run() error {
 	}
 	gologger.Verbose().Msgf("using path %s", r.options.Path)
 
+	findTool := func(name string) (types.Tool, bool) {
+		if mgr != nil && mgr.Catalog() != nil {
+			return mgr.Catalog().Find(name)
+		}
+		if i, ok := utils.Contains(toolList, name); ok {
+			return toolList[i], true
+		}
+		return types.Tool{}, false
+	}
+
 	for _, toolName := range r.options.Install {
 		if !path.IsSubPath(homeDir, r.options.Path) {
 			gologger.Error().Msgf("skipping install outside home folder: %s", toolName)
 			continue
 		}
-		if i, ok := utils.Contains(toolList, toolName); ok {
-			tool := toolList[i]
-			//if tool.InstallType == types.Go && isGoInstalled() {
-			//	if err := pkg.GoInstall(r.options.Path, tool); err != nil {
-			//		gologger.Error().Msgf("%s: %s", tool.Name, err)
-			//	}
-			//	printRequirementInfo(tool)
-			//	continue
-			//}
-
+		if tool, ok := findTool(toolName); ok {
 			if err := pkg.Install(r.options.Path, tool); err != nil {
 				if errors.Is(err, types.ErrIsInstalled) {
 					gologger.Info().Msgf("%s: %s", tool.Name, err)
 				} else {
 					gologger.Error().Msgf("error while installing %s: %s", tool.Name, err)
-					//gologger.Info().Msgf("trying to install %s using go install", tool.Name)
-					//if err := pkg.GoInstall(r.options.Path, tool); err != nil {
-					//	gologger.Error().Msgf("%s: %s", tool.Name, err)
-					//}
 				}
 			}
 			printRequirementInfo(tool)
@@ -135,36 +171,35 @@ func (r *Runner) Run() error {
 			gologger.Error().Msgf("error while installing %s: %s not found in the list", toolName, toolName)
 		}
 	}
-	for _, tool := range r.options.Update {
+	for _, toolName := range r.options.Update {
 		if !path.IsSubPath(homeDir, r.options.Path) {
-			gologger.Error().Msgf("skipping update outside home folder: %s", tool)
+			gologger.Error().Msgf("skipping update outside home folder: %s", toolName)
 			continue
 		}
-		if i, ok := utils.Contains(toolList, tool); ok {
-			if err := pkg.Update(r.options.Path, toolList[i], r.options.DisableChangeLog); err != nil {
+		if tool, ok := findTool(toolName); ok {
+			if err := pkg.Update(r.options.Path, tool, r.options.DisableChangeLog); err != nil {
 				if err == types.ErrIsUpToDate {
-					gologger.Info().Msgf("%s: %s", tool, err)
+					gologger.Info().Msgf("%s: %s", toolName, err)
 				} else {
 					gologger.Info().Msgf("%s\n", err)
 				}
 			}
 		}
 	}
-	for _, tool := range r.options.Remove {
+	for _, toolName := range r.options.Remove {
 		if !path.IsSubPath(homeDir, r.options.Path) {
-			gologger.Error().Msgf("skipping remove outside home folder: %s", tool)
+			gologger.Error().Msgf("skipping remove outside home folder: %s", toolName)
 			continue
 		}
-		if i, ok := utils.Contains(toolList, tool); ok {
-			if err := pkg.Remove(r.options.Path, toolList[i]); err != nil {
+		if tool, ok := findTool(toolName); ok {
+			if err := pkg.Remove(r.options.Path, tool); err != nil {
 				var notFoundError *exec.Error
 				if errors.As(err, &notFoundError) {
-					gologger.Info().Msgf("%s: not found", tool)
+					gologger.Info().Msgf("%s: not found", toolName)
 				} else {
 					gologger.Info().Msgf("%s\n", err)
 				}
 			}
-
 		}
 	}
 	if len(r.options.Install) == 0 && len(r.options.Update) == 0 && len(r.options.Remove) == 0 {
@@ -260,7 +295,11 @@ func (r *Runner) ListToolsAndEnv(tools []types.Tool) error {
 
 	for i, tool := range tools {
 		msg := utils.InstalledVersion(tool, r.options.Path, au)
-		fmt.Printf("%d. %s %s\n", i+1, tool.Name, msg)
+		source := tool.Source
+		if source == "" {
+			source = tool.GetOrg()
+		}
+		fmt.Printf("%d. [%s] %s %s\n", i+1, source, tool.Name, msg)
 	}
 	return nil
 }

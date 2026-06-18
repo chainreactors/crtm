@@ -47,6 +47,9 @@ type Options struct {
 	UpdateAll  bool
 	RemoveAll  bool
 
+	Search  goflags.StringSlice
+	AddTool string
+
 	Verbose            bool
 	Silent             bool
 	Version            bool
@@ -60,7 +63,7 @@ func ParseOptions() *Options {
 	options := &Options{}
 	flagSet := goflags.NewFlagSet()
 
-	flagSet.SetDescription(`crtm is a simple and easy-to-use golang based tool for managing open source projects from ProjectDiscovery`)
+	flagSet.SetDescription(`crtm is a security tool package manager for chainreactors, projectdiscovery, and custom GitHub tools`)
 
 	flagSet.CreateGroup("config", "Config",
 		flagSet.StringVar(&options.ConfigFile, "config", defaultConfigLocation, "cli flag configuration file"),
@@ -84,6 +87,11 @@ func ParseOptions() *Options {
 		flagSet.StringSliceVarP(&options.Remove, "remove", "r", nil, "remove single or multiple project by name (comma separated)", goflags.NormalizedStringSliceOptions),
 		flagSet.BoolVarP(&options.RemoveAll, "remove-all", "ra", false, "remove all the projects"),
 		flagSet.BoolVarP(&options.UnSetPath, "remove-path", "rp", false, "remove path from PATH environment variables"),
+	)
+
+	flagSet.CreateGroup("catalog", "Catalog",
+		flagSet.StringSliceVarP(&options.Search, "search", "s", nil, "search tools by name, tag, or description (comma separated)", goflags.NormalizedStringSliceOptions),
+		flagSet.StringVar(&options.AddTool, "add", "", "add a custom GitHub tool (owner/repo format, e.g. ffuf/ffuf)"),
 	)
 
 	flagSet.CreateGroup("debug", "Debug",

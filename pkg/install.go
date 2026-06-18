@@ -89,7 +89,7 @@ loop:
 		return "", fmt.Errorf(types.ErrNoAssetFound, runtime.GOOS, runtime.GOARCH)
 	}
 
-	_, rdurl, err := utils.GithubClient().Repositories.DownloadReleaseAsset(context.Background(), types.Organization, tool.Repo, int64(id))
+	_, rdurl, err := utils.GithubClient().Repositories.DownloadReleaseAsset(context.Background(), tool.GetOrg(), tool.Repo, int64(id))
 	if err != nil {
 		if arlErr, ok := err.(*github.AbuseRateLimitError); ok {
 			// Provide user with more info regarding the rate limit

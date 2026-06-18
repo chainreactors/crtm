@@ -1,0 +1,34 @@
+- name: gogo
+  repo: chainreactors/gogo
+  asset_pattern: "{name}_{os}_{arch}"
+  description: "Host, port, service and banner discovery"
+  tags: [port, service, scanner, discovery, network]
+  category: scanner
+
+- name: spray
+  repo: chainreactors/spray
+  asset_pattern: "{name}_{os}_{arch}"
+  description: "Web probing, HTTP fingerprints, common files and crawl"
+  tags: [web, http, fingerprint, probe]
+  category: scanner
+
+- name: zombie
+  repo: chainreactors/zombie
+  asset_pattern: "{name}_{os}_{arch}"
+  description: "Weak credential checks for network services"
+  tags: [credential, bruteforce, weak-password]
+  category: exploit
+
+- name: iom
+  repo: chainreactors/malice-network
+  asset_pattern: "malice_network_{os}_{arch}"
+  description: "Malice-network implant/operator framework"
+  tags: [c2, implant, post-exploitation]
+  category: c2
+
+- name: urlfounder
+  repo: chainreactors/urlfounder
+  asset_pattern: "{name}_{os}_{arch}"
+  description: "URL discovery from various sources"
+  tags: [url, discovery, crawler, recon]
+  category: recon
