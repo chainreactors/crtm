@@ -115,7 +115,12 @@ func (m *Manager) InstallVersion(name, version string) error {
 	if !ok {
 		return fmt.Errorf("tool %q not found in registry", name)
 	}
-	return DownloadAndInstall(entry, version, m.binPath)
+	resolved, err := m.downloadAndInstall(entry, version)
+	if err != nil {
+		return err
+	}
+	m.manifest.Set(name, resolved)
+	return nil
 }
 
 // DownloadTo downloads a tool to a custom directory (not the default bin).
@@ -145,9 +150,11 @@ func (m *Manager) InstallFromRepo(repo, assetPattern, version string) (string, e
 		Repo:         repo,
 		AssetPattern: assetPattern,
 	}
-	if err := DownloadAndInstall(entry, version, m.binPath); err != nil {
+	resolved, err := m.downloadAndInstall(entry, version)
+	if err != nil {
 		return "", err
 	}
+	m.manifest.Set(name, resolved)
 	return m.binaryPath(name), nil
 }
 

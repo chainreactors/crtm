@@ -3,10 +3,7 @@ package pkg
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/chainreactors/crtm/pkg/registry"
 )
@@ -18,6 +15,7 @@ import (
 // release download, no API pre-check).
 type Manager struct {
 	catalog    *Catalog
+	manifest   *Manifest
 	binPath    string
 	configPath string
 }
@@ -51,6 +49,7 @@ func NewManager(opt ManagerOption) (*Manager, error) {
 
 	return &Manager{
 		catalog:    NewCatalog(all),
+		manifest:   newManifest(filepath.Dir(opt.ConfigPath)),
 		binPath:    opt.BinPath,
 		configPath: opt.ConfigPath,
 	}, nil
@@ -69,8 +68,7 @@ func (m *Manager) Search(query string) []registry.ToolEntry {
 	return m.catalog.Search(query)
 }
 
-// InstallTool downloads and installs a tool. This is the only method
-// that hits the network — a single HTTP GET to GitHub releases.
+// InstallTool downloads and installs a tool (latest version).
 func (m *Manager) InstallTool(name string) error {
 	entry, ok := m.catalog.Find(name)
 	if !ok {
@@ -79,25 +77,39 @@ func (m *Manager) InstallTool(name string) error {
 	if m.isInstalled(name) {
 		return fmt.Errorf("%s: already installed", name)
 	}
-	return DownloadAndInstall(entry, "", m.binPath)
+	version, err := m.downloadAndInstall(entry, "")
+	if err != nil {
+		return err
+	}
+	m.manifest.Set(name, version)
+	return nil
 }
 
-// UpdateTool re-downloads the latest version of a tool.
+// UpdateTool re-downloads the latest (or specified) version.
 func (m *Manager) UpdateTool(name string) error {
 	entry, ok := m.catalog.Find(name)
 	if !ok {
 		return fmt.Errorf("tool %q not found in registry", name)
 	}
-	return DownloadAndInstall(entry, "", m.binPath)
+	version, err := m.downloadAndInstall(entry, "")
+	if err != nil {
+		return err
+	}
+	m.manifest.Set(name, version)
+	return nil
 }
 
-// RemoveTool deletes an installed tool binary.
+// RemoveTool deletes the binary and removes from manifest.
 func (m *Manager) RemoveTool(name string) error {
 	bin := m.binaryPath(name)
 	if _, err := os.Stat(bin); os.IsNotExist(err) {
 		return fmt.Errorf("%s: not installed", name)
 	}
-	return os.Remove(bin)
+	if err := os.Remove(bin); err != nil {
+		return err
+	}
+	m.manifest.Delete(name)
+	return nil
 }
 
 // AddCustomTool registers a custom tool in the user config.
@@ -110,54 +122,41 @@ func (m *Manager) AddCustomTool(entry registry.ToolEntry) (bool, error) {
 	return true, nil
 }
 
-// IsInstalled checks if a tool binary exists in the bin directory.
+// IsInstalled checks if the binary exists on disk.
 func (m *Manager) IsInstalled(name string) bool {
 	return m.isInstalled(name)
+}
+
+// InstalledVersion returns the version from manifest (instant, no exec).
+// Returns "" if not installed.
+func (m *Manager) InstalledVersion(name string) string {
+	if !m.isInstalled(name) {
+		return ""
+	}
+	if e, ok := m.manifest.Get(name); ok && e.Version != "" {
+		return e.Version
+	}
+	return "installed"
 }
 
 // BinPath returns the binary installation directory.
 func (m *Manager) BinPath() string { return m.binPath }
 
-// InstalledVersion runs the binary with common version flags and extracts
-// a semver-like string. Returns "" if not installed or version undetectable.
-// Purely local — no network.
-func (m *Manager) InstalledVersion(name string) string {
-	bin := m.binaryPath(name)
-	if _, err := os.Stat(bin); err != nil {
-		return ""
+// downloadAndInstall wraps DownloadAndInstall and captures the resolved version.
+func (m *Manager) downloadAndInstall(entry registry.ToolEntry, version string) (string, error) {
+	resolved, err := ResolveVersionIfNeeded(entry, version)
+	if err != nil {
+		return "", err
 	}
-	for _, flag := range []string{"-version", "-v", "--version", "version"} {
-		out, err := exec.Command(bin, flag).CombinedOutput()
-		if err != nil && len(out) == 0 {
-			continue
-		}
-		if v := extractVersion(string(out)); v != "" {
-			return v
-		}
-	}
-	return "installed"
-}
 
-// versionRe matches semver-like patterns but skips dates (YYYY-MM-DD, HH:MM.SS).
-var versionRe = regexp.MustCompile(`(?:^|[\s/v])(\d{1,3}\.\d{1,3}(?:\.\d{1,3})?)(?:\s|$|[),\]])`)
-
-func extractVersion(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		// Skip lines that look like timestamps or dates.
-		if strings.Contains(line, ":") && strings.Count(line, "-") >= 2 {
-			continue
-		}
-		if m := versionRe.FindStringSubmatch(line); len(m) > 1 {
-			v := m[1]
-			parts := strings.Split(v, ".")
-			// Reject if first segment > 100 (likely not a version).
-			if len(parts) > 0 && len(parts[0]) > 2 {
-				continue
-			}
-			return v
-		}
+	if err := DownloadAndInstall(entry, resolved, m.binPath); err != nil {
+		return "", err
 	}
-	return ""
+
+	if resolved != "" {
+		return resolved, nil
+	}
+	return "latest", nil
 }
 
 func (m *Manager) isInstalled(name string) bool {
