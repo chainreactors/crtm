@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"embed"
+	_ "embed"
 	"fmt"
 	"net/url"
 	"runtime"
@@ -10,17 +10,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed *.yaml
-var embedded embed.FS
+//go:embed arsenal.yaml
+var embedded []byte
 
 // ToolEntry is the declarative definition of a tool in the YAML registry.
-// No version — version is resolved lazily at install time.
+// Version is the default for bundles; omitted versions resolve at build time.
 type ToolEntry struct {
 	Name         string   `yaml:"name" json:"name"`
+	Version      string   `yaml:"version,omitempty" json:"version,omitempty"`
 	Repo         string   `yaml:"repo" json:"repo"`
 	AssetPattern string   `yaml:"asset_pattern" json:"asset_pattern"`
 	Description  string   `yaml:"description,omitempty" json:"description,omitempty"`
-	Tags         []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Tags         []string `yaml:"tags,omitempty,flow" json:"tags,omitempty"`
 	Category     string   `yaml:"category,omitempty" json:"category,omitempty"`
 	DocsURL      string   `yaml:"docs_url,omitempty" json:"docs_url,omitempty"`
 	Hint         string   `yaml:"hint,omitempty" json:"hint,omitempty"`
@@ -32,7 +33,7 @@ type ToolEntry struct {
 
 // PlatformAsset selects a release artifact by GOOS/GOARCH.
 type PlatformAsset struct {
-	Asset      string `yaml:"asset" json:"asset"`
+	Asset      string `yaml:"asset,omitempty" json:"asset,omitempty"`
 	Executable string `yaml:"executable,omitempty" json:"executable,omitempty"`
 }
 
@@ -43,7 +44,9 @@ func (e ToolEntry) AssetFor(version, goos, goarch string) (string, string, error
 		if !ok {
 			return "", "", fmt.Errorf("%s: unsupported platform %s/%s", e.Name, goos, goarch)
 		}
-		pattern = platform.Asset
+		if platform.Asset != "" {
+			pattern = platform.Asset
+		}
 		if platform.Executable != "" {
 			executable = platform.Executable
 		}
@@ -117,21 +120,9 @@ func (e ToolEntry) DownloadURL(version string) string {
 	return u
 }
 
-// LoadEmbedded loads the built-in CR + PD tool registries.
+// LoadEmbedded loads Arsenal's unified tool catalog.
 func LoadEmbedded() ([]ToolEntry, error) {
-	var all []ToolEntry
-	for _, name := range []string{"chainreactors.yaml", "projectdiscovery.yaml", "audit.yaml"} {
-		data, err := embedded.ReadFile(name)
-		if err != nil {
-			return nil, fmt.Errorf("read embedded %s: %w", name, err)
-		}
-		var entries []ToolEntry
-		if err := yaml.Unmarshal(data, &entries); err != nil {
-			return nil, fmt.Errorf("parse embedded %s: %w", name, err)
-		}
-		all = append(all, entries...)
-	}
-	return all, nil
+	return ParseYAML(embedded)
 }
 
 // ParseYAML parses a YAML file containing a list of ToolEntry.

@@ -14,7 +14,9 @@ func TestLoadEmbedded(t *testing.T) {
 
 	names := map[string]bool{}
 	for _, e := range entries {
+		require.False(t, names[e.Name], "duplicate tool %s", e.Name)
 		names[e.Name] = true
+		require.NotEmpty(t, e.Version, "tool %s needs a default bundle version", e.Name)
 		require.NotEmpty(t, e.Repo, "tool %s must have repo", e.Name)
 		require.NotEmpty(t, e.AssetPattern, "tool %s must have asset_pattern", e.Name)
 		require.Contains(t, e.Repo, "/", "repo %s must be org/name format", e.Repo)
@@ -29,6 +31,32 @@ func TestLoadEmbedded(t *testing.T) {
 	require.True(t, names["nuclei"])
 	require.True(t, names["httpx"])
 	require.True(t, names["subfinder"])
+}
+
+func TestArsenalReleaseAssetNames(t *testing.T) {
+	entries, err := LoadEmbedded()
+	require.NoError(t, err)
+	byName := map[string]ToolEntry{}
+	for _, entry := range entries {
+		byName[entry.Name] = entry
+	}
+	for _, test := range []struct{ name, goos, arch, asset string }{
+		{"gogo", "windows", "amd64", "gogo_windows_amd64.exe"},
+		{"spray", "darwin", "arm64", "spray_darwin_arm64"},
+		{"iom", "linux", "amd64", "iom_linux_amd64"},
+		{"urlfounder", "windows", "amd64", "urlfounder_1.2.3_windows_amd64.exe"},
+		{"urlfounder", "linux", "arm", "urlfounder_1.2.3_linux_armv6"},
+		{"nuclei", "linux", "amd64", "nuclei_1.2.3_linux_amd64.zip"},
+		{"subfinder", "windows", "arm64", "subfinder_1.2.3_windows_arm64.zip"},
+	} {
+		asset, _, err := byName[test.name].AssetFor("1.2.3", test.goos, test.arch)
+		require.NoError(t, err)
+		require.Equal(t, test.asset, asset)
+	}
+	for _, name := range []string{"gogo", "spray", "nuclei", "httpx"} {
+		_, _, err := byName[name].AssetFor("1.2.3", "windows", "arm64")
+		require.ErrorContains(t, err, "unsupported platform")
+	}
 }
 
 func TestToolEntryOrgRepo(t *testing.T) {

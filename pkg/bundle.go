@@ -19,11 +19,11 @@ import (
 	"github.com/chainreactors/crtm/pkg/registry"
 )
 
-// BundleSpec is the build input. Empty versions resolve latest at build time.
+// BundleSpec selects tools from Arsenal. Empty versions inherit catalog defaults.
 type BundleSpec struct {
 	ID          string               `yaml:"id"`
 	Catalog     string               `yaml:"catalog,omitempty"`
-	Tools       map[string]string    `yaml:"tools"`
+	Tools       ToolSelection        `yaml:"tools"`
 	CustomTools []registry.ToolEntry `yaml:"custom_tools,omitempty"`
 }
 
@@ -111,7 +111,8 @@ func (r *bundleReader) Close() error { return errors.Join(r.Reader.Close(), r.fi
 // It returns that directory for embedding or use through os.DirFS. A failed
 // build leaves earlier bundles intact. Sources default to GitHub.
 func BuildBundle(ctx context.Context, spec BundleSpec, target Target, output string, sources ...Source) (string, error) {
-	if err := spec.Validate(); err != nil {
+	spec, err := spec.resolved()
+	if err != nil {
 		return "", err
 	}
 	if err := target.validate(); err != nil {

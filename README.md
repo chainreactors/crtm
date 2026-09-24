@@ -100,18 +100,19 @@ $ crtm -install-all
 ## Bundles for Go applications
 
 `crtm-bundle` downloads selected tools for an explicit target and packages their
-executables with version and SHA-256 metadata. For example, create `tools.yaml`:
+executables with version and SHA-256 metadata. Arsenal's [unified catalog](pkg/registry/arsenal.yaml)
+owns repository definitions, default bundle versions and supported platforms.
+For example, create `bundle.yaml` containing only the tools an application needs:
 
 ```yaml
 id: my-application
-tools:
-  rg: "15.2.0"
+tools: [rg, ast-grep, osv-scanner]
 ```
 
 Run the generator on the build host, then compile the application for the same target:
 
 ```sh
-go run ./cmd/crtm-bundle -config tools.yaml -target linux/amd64 -output internal/toolbundle -package toolbundle
+go run ./cmd/crtm-bundle -config bundle.yaml -target linux/amd64 -output internal/toolbundle -package toolbundle
 GOOS=linux GOARCH=amd64 go build -tags arsenal_embed ./cmd/my-application
 ```
 
@@ -124,25 +125,29 @@ application upgrades; explicit user installations and edits are retained.
 Without `-package`, the command produces a standalone bundle directory. Open it with
 `pkg.OpenBundle(os.DirFS(path))`; the same Source implementation reads `embed.FS`.
 `pkg.BuildBundle` is the library entry point. Custom tools reuse the registry's
-`custom_tools` definitions in the YAML file. Empty versions or `latest` resolve to
-fixed releases during packaging. The bundle ID should remain stable between releases.
+`custom_tools` definitions in the YAML file. Names inherit catalog versions; a map
+such as `tools: {rg: "15.2.0"}` overrides versions for one application. If no default
+version is defined, or `latest` is requested, packaging resolves a fixed release.
+The bundle ID should remain stable between releases.
 
 Bundle payloads contain executables only. Tools may still need their own external
 templates, databases, or runtime libraries. Normal `UpdateTool` requests remote latest;
 source integrity errors fail directly instead of falling back to another source.
 
-Multiple applications can share an `arsenal.yaml` catalog of versions and
-`custom_tools` definitions. Each release selects its tools and inherits versions:
+Add tools for new scenarios to `pkg/registry/arsenal.yaml`, then select them by
+name in a release. Explicit platform mappings can override the asset filename;
+empty platform entries use `asset_pattern`. Unlisted platforms fail before download.
+An optional external catalog uses the same list of tool entries:
 
 ```yaml
-id: my-application
-catalog: ../../arsenal.yaml
-tools:
-  rg:
+- name: custom
+  version: "1.2.3"
+  repo: owner/custom
+  asset_pattern: "{name}_{version}_{os}_{arch}.zip"
 ```
 
-Catalog paths are relative to the selection file. A nonempty version overrides
-the catalog default. The generator resolves selections with `pkg.LoadBundleSpec`
+Reference it with `catalog: path/to/arsenal.yaml` in the bundle selection. Paths
+are relative to the selection file. The generator resolves names with `pkg.LoadBundleSpec`
 and emits `bundle_spec_generated.go` for runtime requirements and installation.
 Use `-metadata-only -package toolbundle` to regenerate this small, committed file
 without downloading executables. Custom definitions work in remote-only builds

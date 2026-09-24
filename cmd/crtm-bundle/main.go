@@ -27,7 +27,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("crtm-bundle", flag.ContinueOnError)
-	config := flags.String("config", "arsenal.yaml", "bundle specification")
+	config := flags.String("config", "bundle.yaml", "bundle selection")
 	targetName := flags.String("target", crtm.CurrentTarget().String(), "target GOOS/GOARCH")
 	output := flags.String("output", "bundle", "output directory (Go package directory with -package)")
 	packageName := flags.String("package", "", "generate EmbeddedBundle() in this Go package")
@@ -52,9 +52,6 @@ func run(ctx context.Context, args []string) error {
 	target := crtm.Target{GOOS: goos, GOARCH: goarch}
 	spec, err := crtm.LoadBundleSpec(*config)
 	if err != nil {
-		return err
-	}
-	if err := spec.Validate(); err != nil {
 		return err
 	}
 	if *metadataOnly {
