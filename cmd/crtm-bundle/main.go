@@ -83,21 +83,39 @@ func writeSpec(output, packageName string, spec crtm.BundleSpec) error {
 	if len(spec.CustomTools) > 0 {
 		fmt.Fprintf(&source, "%q\n", "github.com/chainreactors/crtm/pkg/registry")
 	}
-	fmt.Fprintf(&source, ")\n\nvar ToolSpec = crtm.BundleSpec{\nID: %q,\nTools: map[string]string{\n", spec.ID)
-	names := make([]string, 0, len(spec.Tools))
-	for name := range spec.Tools {
-		names = append(names, name)
+	fmt.Fprintf(&source, ")\n\nvar ToolSpec = crtm.BundleSpec{\nID: %q,\nTools: ", spec.ID)
+	writeSelection(&source, spec.Tools)
+	if len(spec.Platforms) > 0 {
+		source.WriteString("Platforms: map[string]crtm.ToolSelection{\n")
+		platforms := make([]string, 0, len(spec.Platforms))
+		for platform := range spec.Platforms {
+			platforms = append(platforms, platform)
+		}
+		sort.Strings(platforms)
+		for _, platform := range platforms {
+			fmt.Fprintf(&source, "%q: ", platform)
+			writeSelection(&source, spec.Platforms[platform])
+		}
+		source.WriteString("},\n")
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		fmt.Fprintf(&source, "%q: %q,\n", name, spec.Tools[name])
-	}
-	source.WriteString("},\n")
 	if len(spec.CustomTools) > 0 {
 		fmt.Fprintf(&source, "CustomTools: %#v,\n", spec.CustomTools)
 	}
 	source.WriteString("}\n")
 	return writeGo(output, "bundle_spec_generated.go", []byte(source.String()))
+}
+
+func writeSelection(source *strings.Builder, tools crtm.ToolSelection) {
+	source.WriteString("map[string]string{\n")
+	names := make([]string, 0, len(tools))
+	for name := range tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(source, "%q: %q,\n", name, tools[name])
+	}
+	source.WriteString("},\n")
 }
 
 func writeEmbed(output, dir, packageName, tag string, target crtm.Target) error {

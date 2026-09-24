@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/chainreactors/crtm/pkg/registry"
 	"gopkg.in/yaml.v3"
@@ -83,6 +84,19 @@ func (s BundleSpec) ManagerOption(bundle *Bundle) ManagerOption {
 	return opt
 }
 
+// ToolsFor returns the common tools plus this platform's additions. Platform
+// versions override common versions; the original selection is never mutated.
+func (s BundleSpec) ToolsFor(target Target) ToolSelection {
+	tools := make(ToolSelection, len(s.Tools)+len(s.Platforms[target.String()]))
+	for name, version := range s.Tools {
+		tools[name] = version
+	}
+	for name, version := range s.Platforms[target.String()] {
+		tools[name] = version
+	}
+	return tools
+}
+
 // Validate checks the selection before a generator writes metadata or downloads.
 func (s BundleSpec) Validate() error {
 	_, err := s.resolved()
@@ -93,7 +107,7 @@ func (s BundleSpec) resolved() (BundleSpec, error) {
 	if s.Catalog != "" {
 		return BundleSpec{}, fmt.Errorf("unresolved catalog: use LoadBundleSpec")
 	}
-	if !validToolName(s.ID) || len(s.Tools) == 0 {
+	if !validToolName(s.ID) || len(s.Tools) == 0 && len(s.Platforms) == 0 {
 		return BundleSpec{}, fmt.Errorf("bundle requires an ID and at least one tool")
 	}
 	entries, err := registry.LoadEmbedded()
@@ -101,22 +115,43 @@ func (s BundleSpec) resolved() (BundleSpec, error) {
 		return BundleSpec{}, err
 	}
 	catalog := NewCatalog(registry.Merge(entries, s.CustomTools))
-	versions := make(ToolSelection, len(s.Tools))
-	for name, version := range s.Tools {
-		entry, ok := catalog.Find(name)
-		if !ok || entry.Name != name || !validToolName(name) {
-			return BundleSpec{}, fmt.Errorf("invalid or unknown tool %q", name)
+	selected := map[string]bool{}
+	resolveSelection := func(selection ToolSelection) (ToolSelection, error) {
+		versions := make(ToolSelection, len(selection))
+		for name, version := range selection {
+			entry, ok := catalog.Find(name)
+			if !ok || entry.Name != name || !validToolName(name) {
+				return nil, fmt.Errorf("invalid or unknown tool %q", name)
+			}
+			if version == "" {
+				version = entry.Version
+			}
+			versions[name] = version
+			selected[name] = true
 		}
-		if version == "" {
-			version = entry.Version
-		}
-		versions[name] = version
+		return versions, nil
 	}
-	s.Tools = versions
+	if s.Tools, err = resolveSelection(s.Tools); err != nil {
+		return BundleSpec{}, err
+	}
+	if s.Platforms != nil {
+		platforms := make(map[string]ToolSelection, len(s.Platforms))
+		for platform, tools := range s.Platforms {
+			goos, goarch, _ := strings.Cut(platform, "/")
+			if err := (Target{goos, goarch}).validate(); err != nil {
+				return BundleSpec{}, err
+			}
+			platforms[platform], err = resolveSelection(tools)
+			if err != nil {
+				return BundleSpec{}, fmt.Errorf("%s: %w", platform, err)
+			}
+		}
+		s.Platforms = platforms
+	}
 	definitions := s.CustomTools
 	s.CustomTools = nil
 	for _, entry := range definitions {
-		if _, selected := s.Tools[entry.Name]; selected {
+		if selected[entry.Name] {
 			s.CustomTools = append(s.CustomTools, entry)
 		}
 	}

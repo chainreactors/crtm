@@ -21,10 +21,11 @@ import (
 
 // BundleSpec selects tools from Arsenal. Empty versions inherit catalog defaults.
 type BundleSpec struct {
-	ID          string               `yaml:"id"`
-	Catalog     string               `yaml:"catalog,omitempty"`
-	Tools       ToolSelection        `yaml:"tools"`
-	CustomTools []registry.ToolEntry `yaml:"custom_tools,omitempty"`
+	ID          string                   `yaml:"id"`
+	Catalog     string                   `yaml:"catalog,omitempty"`
+	Tools       ToolSelection            `yaml:"tools"`
+	Platforms   map[string]ToolSelection `yaml:"platforms,omitempty"`
+	CustomTools []registry.ToolEntry     `yaml:"custom_tools,omitempty"`
 }
 
 type bundleManifest struct {
@@ -118,6 +119,10 @@ func BuildBundle(ctx context.Context, spec BundleSpec, target Target, output str
 	if err := target.validate(); err != nil {
 		return "", err
 	}
+	selected := spec.ToolsFor(target)
+	if len(selected) == 0 {
+		return "", fmt.Errorf("bundle has no tools for %s", target)
+	}
 	entries, err := registry.LoadEmbedded()
 	if err != nil {
 		return "", err
@@ -126,8 +131,8 @@ func BuildBundle(ctx context.Context, spec BundleSpec, target Target, output str
 	if len(sources) == 0 {
 		sources = []Source{GitHubSource{}}
 	}
-	names := make([]string, 0, len(spec.Tools))
-	for name := range spec.Tools {
+	names := make([]string, 0, len(selected))
+	for name := range selected {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -145,7 +150,7 @@ func BuildBundle(ctx context.Context, spec BundleSpec, target Target, output str
 		if !ok {
 			return "", fmt.Errorf("tool %q not found in registry", name)
 		}
-		a, err := resolve(ctx, sources, Request{entry, spec.Tools[name], target})
+		a, err := resolve(ctx, sources, Request{entry, selected[name], target})
 		if err != nil {
 			return "", err
 		}

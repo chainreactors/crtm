@@ -56,11 +56,13 @@ func TestGeneratedEmbedBuildAndRun(t *testing.T) {
 	if other == target {
 		other = crtm.Target{GOOS: "windows", GOARCH: "amd64"}
 	}
-	spec := crtm.BundleSpec{ID: "fixture-app", Tools: map[string]string{"fixture-tool": "1.0.0"}, CustomTools: []registry.ToolEntry{
-		{Name: "fixture-tool", Repo: "example/fixture", AssetPattern: "{name}_{os}_{arch}", Platforms: map[string]registry.PlatformAsset{
-			"linux/arm64": {Asset: "fixture-linux-arm64"},
-		}},
-	}}
+	spec := crtm.BundleSpec{ID: "fixture-app", Tools: map[string]string{"fixture-tool": "1.0.0"},
+		Platforms: map[string]crtm.ToolSelection{other.String(): {"cross-tool": "2.0.0"}}, CustomTools: []registry.ToolEntry{
+			{Name: "cross-tool", Repo: "example/cross-tool"},
+			{Name: "fixture-tool", Repo: "example/fixture", AssetPattern: "{name}_{os}_{arch}", Platforms: map[string]registry.PlatformAsset{
+				"linux/arm64": {Asset: "fixture-linux-arm64"},
+			}},
+		}}
 	require.NoError(t, writeSpec(dir, "main", spec))
 	for _, platform := range []crtm.Target{target, other} {
 		payload := body
@@ -83,6 +85,7 @@ import (
  crtm "github.com/chainreactors/crtm/pkg"
 )
 func main() {
+ if len(ToolSpec.ToolsFor(crtm.CurrentTarget())) != 1 { panic("wrong runtime tool selection") }
  b, err := EmbeddedBundle(); if err != nil { panic(err) }; if b == nil { return }
  options := ToolSpec.ManagerOption(b)
  options.BinPath, options.ConfigPath = filepath.Join(os.Args[1],"bin"), filepath.Join(os.Args[1],"config.yaml")
@@ -98,7 +101,7 @@ func main() {
 		var listed struct{ EmbedFiles []string }
 		out := runGo(platform, "list", "-mod=mod", "-json", "-tags=arsenal_embed", ".")
 		require.NoError(t, json.Unmarshal(out, &listed))
-		require.Len(t, listed.EmbedFiles, 2)
+		require.Len(t, listed.EmbedFiles, 1+len(spec.ToolsFor(platform)))
 		for _, file := range listed.EmbedFiles {
 			require.Contains(t, file, "assets/"+platform.GOOS+"_"+platform.GOARCH+"/")
 		}

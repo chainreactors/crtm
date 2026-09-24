@@ -88,3 +88,80 @@ func TestBundleSelectsArsenalNames(t *testing.T) {
 	_, err = LoadBundleSpec(path)
 	require.ErrorContains(t, err, "duplicate tool")
 }
+
+func TestPlatformBundleSelection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bundle.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+id: audit
+tools: [rg]
+platforms:
+  windows/amd64: [windows-tool, shared-tool, second-tool]
+  linux/amd64:
+    shared-tool:
+    second-tool:
+    rg: "15.3.0"
+custom_tools:
+  - name: windows-tool
+    version: 6.2.2
+    repo: example/windows-tool
+  - name: shared-tool
+    version: 9.4.0
+    repo: example/shared-tool
+  - name: second-tool
+    version: 3.1.1
+    repo: example/second-tool
+  - name: unused
+    repo: example/unused
+`), 0644))
+	spec, err := LoadBundleSpec(path)
+	require.NoError(t, err)
+	require.NoError(t, spec.Validate())
+	require.Len(t, spec.CustomTools, 3)
+	for _, test := range []struct {
+		target Target
+		tools  ToolSelection
+	}{
+		{Target{"windows", "amd64"}, ToolSelection{"rg": "15.2.0", "windows-tool": "6.2.2", "shared-tool": "9.4.0", "second-tool": "3.1.1"}},
+		{Target{"linux", "amd64"}, ToolSelection{"rg": "15.3.0", "shared-tool": "9.4.0", "second-tool": "3.1.1"}},
+		{Target{"windows", "arm64"}, ToolSelection{"rg": "15.2.0"}},
+		{Target{"darwin", "arm64"}, ToolSelection{"rg": "15.2.0"}},
+	} {
+		t.Run(test.target.String(), func(t *testing.T) {
+			require.Equal(t, test.tools, spec.ToolsFor(test.target))
+			dir, err := BuildBundle(context.Background(), spec, test.target, t.TempDir(), fixtureSource(nil))
+			require.NoError(t, err)
+			bundle, err := OpenBundle(os.DirFS(dir))
+			require.NoError(t, err)
+			actual := ToolSelection{}
+			for _, tool := range bundle.manifest.Tools {
+				actual[tool.Tool.Name] = tool.Version
+			}
+			require.Equal(t, test.tools, actual)
+		})
+	}
+	// Selection and overrides must not leak into another target or common tools.
+	spec.ToolsFor(Target{"linux", "amd64"})["rg"] = "changed"
+	require.Equal(t, ToolSelection{"rg": "15.2.0"}, spec.Tools)
+	require.Equal(t, "15.3.0", spec.Platforms["linux/amd64"]["rg"])
+
+	for _, invalid := range []string{
+		"platforms:\n  linux-amd64: [shared-tool]\n",
+		"platforms:\n  windows/amd64: [unknown]\n",
+		"platforms:\n  windows/amd64: [shared-tool, shared-tool]\n",
+	} {
+		require.NoError(t, os.WriteFile(path, []byte("id: audit\ntools: [rg]\n"+invalid), 0644))
+		_, err := LoadBundleSpec(path)
+		require.Error(t, err)
+	}
+}
+
+func TestPlatformOnlyCustomTool(t *testing.T) {
+	spec := BundleSpec{ID: "custom", Platforms: map[string]ToolSelection{"linux/amd64": {"local": ""}},
+		CustomTools: []registry.ToolEntry{{Name: "local", Version: "1.0.0", Repo: "example/local"}}}
+	resolved, err := spec.resolved()
+	require.NoError(t, err)
+	require.Len(t, resolved.CustomTools, 1)
+	require.Equal(t, "1.0.0", resolved.ToolsFor(Target{"linux", "amd64"})["local"])
+	_, err = BuildBundle(context.Background(), spec, Target{"windows", "amd64"}, t.TempDir(), fixtureSource(nil))
+	require.ErrorContains(t, err, "no tools")
+}
