@@ -22,6 +22,24 @@ import (
 
 type sourceFunc func(context.Context, Request) (Artifact, error)
 
+func TestPrepareUsesConfiguredSources(t *testing.T) {
+	b, _ := testBundle(t, "1.0.0")
+	remote := sourceFunc(func(context.Context, Request) (Artifact, error) {
+		t.Fatal("Prepare consulted a remote source")
+		return Artifact{}, ErrArtifactNotFound
+	})
+	m := bundleManager(t, t.TempDir(), remote, b)
+	require.NoError(t, m.Prepare(t.Context()))
+	require.Equal(t, "1.0.0", m.InstalledVersion("gogo"))
+	require.NoError(t, m.Prepare(t.Context()))
+	require.NoError(t, m.RemoveTool("gogo"))
+	require.NoError(t, m.Prepare(t.Context()))
+	require.Equal(t, "1.0.0", m.InstalledVersion("gogo"))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, bundleManager(t, t.TempDir()).Prepare(ctx), context.Canceled)
+}
+
 func (f sourceFunc) Resolve(ctx context.Context, r Request) (Artifact, error) { return f(ctx, r) }
 
 func fixtureSource(body []byte) Source {
@@ -64,29 +82,29 @@ func TestBundleLifecycle(t *testing.T) {
 	m := bundleManager(t, dir, b1, fixtureSource(nil))
 	_, err := os.Stat(m.binPath)
 	require.True(t, os.IsNotExist(err))
-	require.NoError(t, m.Prepare(ctx, b1))
+	require.NoError(t, m.prepareBundle(ctx, b1))
 	require.Equal(t, "1.0.0", m.InstalledVersion("gogo"))
 	initial, _ := os.Stat(m.binaryPath("gogo"))
 	entry, _ := m.manifest.Get("gogo")
 	require.Equal(t, "test-app", entry.ManagedBy)
-	require.NoError(t, m.Prepare(ctx, b1))
+	require.NoError(t, m.prepareBundle(ctx, b1))
 	again, _ := os.Stat(m.binaryPath("gogo"))
 	require.Equal(t, initial.ModTime(), again.ModTime())
 	require.True(t, os.SameFile(initial, again))
 
 	m = bundleManager(t, dir, b2, fixtureSource(nil))
-	require.NoError(t, m.Prepare(ctx, b2))
+	require.NoError(t, m.prepareBundle(ctx, b2))
 	require.Equal(t, "2.0.0", m.InstalledVersion("gogo"))
 	// Explicit update bypasses the immutable bundle and relinquishes ownership.
 	require.NoError(t, m.UpdateTool("gogo"))
 	require.Equal(t, "9.0.0", m.InstalledVersion("gogo"))
-	require.NoError(t, m.Prepare(ctx, b1))
+	require.NoError(t, m.prepareBundle(ctx, b1))
 	require.Equal(t, "9.0.0", m.InstalledVersion("gogo"))
 	entry, _ = m.manifest.Get("gogo")
 	require.Empty(t, entry.ManagedBy)
 
 	require.NoError(t, m.RemoveTool("gogo"))
-	require.NoError(t, m.Prepare(ctx, b2))
+	require.NoError(t, m.prepareBundle(ctx, b2))
 	require.Equal(t, "2.0.0", m.InstalledVersion("gogo"))
 	// Same process can reinstall from the bundle without a network source.
 	require.NoError(t, m.RemoveTool("gogo"))
@@ -101,7 +119,7 @@ func TestBundlePreservesUserFiles(t *testing.T) {
 	for _, mode := range []string{"modified", "legacy", "different-owner"} {
 		t.Run(mode, func(t *testing.T) {
 			m := bundleManager(t, t.TempDir(), b1)
-			require.NoError(t, m.Prepare(context.Background(), b1))
+			require.NoError(t, m.prepareBundle(context.Background(), b1))
 			entry, _ := m.manifest.Get("gogo")
 			switch mode {
 			case "modified":
@@ -114,7 +132,7 @@ func TestBundlePreservesUserFiles(t *testing.T) {
 			}
 			before, err := os.ReadFile(m.binaryPath("gogo"))
 			require.NoError(t, err)
-			require.NoError(t, m.Prepare(context.Background(), b2))
+			require.NoError(t, m.prepareBundle(context.Background(), b2))
 			after, err := os.ReadFile(m.binaryPath("gogo"))
 			require.NoError(t, err)
 			require.Equal(t, before, after)
@@ -130,11 +148,11 @@ func TestBundleCorruptionDoesNotFallbackOrReplace(t *testing.T) {
 		return Artifact{}, nil
 	})
 	m := bundleManager(t, t.TempDir(), b1)
-	require.NoError(t, m.Prepare(context.Background(), b1))
+	require.NoError(t, m.prepareBundle(context.Background(), b1))
 	before, err := os.ReadFile(m.binaryPath("gogo"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "gogo.gz"), []byte("broken"), 0644))
-	require.Error(t, m.Prepare(context.Background(), b2))
+	require.Error(t, m.prepareBundle(context.Background(), b2))
 	after, err := os.ReadFile(m.binaryPath("gogo"))
 	require.NoError(t, err)
 	require.Equal(t, before, after)
@@ -150,7 +168,7 @@ func TestBundleIntegrityAndValidationPreserveInstallation(t *testing.T) {
 			b1, _ := testBundle(t, "1.0.0")
 			b2, _ := testBundle(t, "2.0.0")
 			m := bundleManager(t, t.TempDir(), b1)
-			require.NoError(t, m.Prepare(context.Background(), b1))
+			require.NoError(t, m.prepareBundle(context.Background(), b1))
 			before, err := os.ReadFile(m.binaryPath("gogo"))
 			require.NoError(t, err)
 			switch failure {
@@ -161,9 +179,9 @@ func TestBundleIntegrityAndValidationPreserveInstallation(t *testing.T) {
 			}
 			if failure == "validation" {
 				m.sources = []Source{b2}
-				err = m.InstallVersionContext(context.Background(), "gogo", "2.0.0", func(context.Context, string) error { return errors.New("incompatible tool") })
+				err = m.Install(context.Background(), "gogo", "2.0.0", func(context.Context, string) error { return errors.New("incompatible tool") })
 			} else {
-				err = m.Prepare(context.Background(), b2)
+				err = m.prepareBundle(context.Background(), b2)
 			}
 			require.Error(t, err)
 			after, err := os.ReadFile(m.binaryPath("gogo"))
@@ -189,13 +207,13 @@ func TestBundleSourcesAndDefinitions(t *testing.T) {
 	require.ErrorContains(t, m.InstallTool("gogo"), "source failed")
 
 	custom := registry.ToolEntry{Name: "bundle-fixture", Repo: "example/fixture", AssetPattern: "fixture_{os}_{arch}"}
-	output, err := BuildBundle(context.Background(), BundleSpec{ID: "custom", Tools: map[string]string{custom.Name: "1.0.0"}, CustomTools: []registry.ToolEntry{custom}}, CurrentTarget(), t.TempDir(), fixtureSource(nil))
+	output, err := BuildBundle(context.Background(), BundleSpec{ID: "custom", Tools: map[string]string{custom.Name: "1.0.0"}, Definitions: []registry.ToolEntry{custom}}, CurrentTarget(), t.TempDir(), fixtureSource(nil))
 	require.NoError(t, err)
 	b, err = OpenBundle(os.DirFS(output))
 	require.NoError(t, err)
 	dir := t.TempDir()
 	m = bundleManager(t, dir, b)
-	require.NoError(t, m.Prepare(context.Background(), b))
+	require.NoError(t, m.prepareBundle(context.Background(), b))
 	_, ok := m.catalog.Find(custom.Name)
 	require.True(t, ok)
 	_, err = os.Stat(m.configPath)
@@ -272,7 +290,7 @@ func TestBundleCrossTarget(t *testing.T) {
 	b, err := OpenBundle(os.DirFS(dir))
 	require.NoError(t, err)
 	m := bundleManager(t, t.TempDir(), b)
-	require.ErrorContains(t, m.Prepare(context.Background(), b), "targets")
+	require.ErrorContains(t, m.prepareBundle(context.Background(), b), "targets")
 	require.False(t, m.IsInstalled("gogo"))
 }
 
@@ -288,7 +306,7 @@ func TestBundleConcurrentPrepare(t *testing.T) {
 	}
 	for _, m := range managers {
 		wg.Add(1)
-		go func(m *Manager) { defer wg.Done(); errs <- m.Prepare(context.Background(), b) }(m)
+		go func(m *Manager) { defer wg.Done(); errs <- m.prepareBundle(context.Background(), b) }(m)
 	}
 	wg.Wait()
 	close(errs)
@@ -307,7 +325,7 @@ func TestBundleProcessHelper(t *testing.T) {
 	b, err := OpenBundle(os.DirFS(os.Getenv("CRTM_BUNDLE_DIR")))
 	require.NoError(t, err)
 	m := bundleManager(t, os.Getenv("CRTM_INSTALL_DIR"), b)
-	require.NoError(t, m.Prepare(context.Background(), b))
+	require.NoError(t, m.prepareBundle(context.Background(), b))
 }
 
 func TestBundleConcurrentProcesses(t *testing.T) {
@@ -346,7 +364,7 @@ func TestBundleManifestWriteFailureIsReported(t *testing.T) {
 	bad := filepath.Join(t.TempDir(), "not-a-directory")
 	require.NoError(t, os.WriteFile(bad, nil, 0644))
 	m.manifest.path = filepath.Join(bad, "manifest.json")
-	require.Error(t, m.Prepare(context.Background(), b))
+	require.Error(t, m.prepareBundle(context.Background(), b))
 	require.False(t, m.IsInstalled("gogo"))
 }
 
@@ -368,12 +386,12 @@ func TestBundleRealExecutable(t *testing.T) {
 	b, err := OpenBundle(os.DirFS(bundleDir))
 	require.NoError(t, err)
 	m := bundleManager(t, t.TempDir(), b)
-	require.NoError(t, m.Prepare(context.Background(), b))
+	require.NoError(t, m.prepareBundle(context.Background(), b))
 	out, err = exec.Command(m.binaryPath("gogo")).CombinedOutput()
 	require.NoError(t, err, string(out))
 	require.Equal(t, "bundle works\n", strings.ReplaceAll(string(out), "\r\n", "\n"))
 	// Consumers such as audit execute the staged path before installation.
-	require.NoError(t, m.InstallVersionContext(context.Background(), "gogo", "1.0.0", func(ctx context.Context, path string) error {
+	require.NoError(t, m.Install(context.Background(), "gogo", "1.0.0", func(ctx context.Context, path string) error {
 		out, err := exec.CommandContext(ctx, path).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("staged executable: %w: %s", err, out)

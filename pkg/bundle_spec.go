@@ -33,9 +33,8 @@ func (s *ToolSelection) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// LoadBundleSpec selects tools and versions from Arsenal's embedded catalog.
-// An optional catalog file uses the same ToolEntry YAML format and is resolved
-// relative to the selection file. Only selected custom definitions are retained.
+// LoadBundleSpec resolves a selection against its catalog, relative to the YAML
+// file. Without a catalog it uses CRTM defaults. Only selected definitions remain.
 func LoadBundleSpec(path string) (BundleSpec, error) {
 	spec, err := readBundleSpec(path)
 	if err != nil {
@@ -54,7 +53,7 @@ func LoadBundleSpec(path string) (BundleSpec, error) {
 		if err != nil {
 			return BundleSpec{}, fmt.Errorf("%s: %w", catalogPath, err)
 		}
-		spec.CustomTools = registry.Merge(entries, spec.CustomTools)
+		spec.Definitions = registry.Merge(entries, spec.Definitions)
 		spec.Catalog = ""
 	}
 	return spec.resolved()
@@ -77,7 +76,7 @@ func readBundleSpec(path string) (BundleSpec, error) {
 // ManagerOption uses the same selected definitions for remote and embedded
 // installations. The caller supplies only installation paths.
 func (s BundleSpec) ManagerOption(bundle *Bundle) ManagerOption {
-	opt := ManagerOption{Tools: s.CustomTools, Sources: []Source{GitHubSource{}}}
+	opt := ManagerOption{Catalog: s.Definitions, Sources: []Source{GitHubSource{}}}
 	if bundle != nil {
 		opt.Sources = append([]Source{bundle}, opt.Sources...)
 	}
@@ -110,11 +109,15 @@ func (s BundleSpec) resolved() (BundleSpec, error) {
 	if !validToolName(s.ID) || len(s.Tools) == 0 && len(s.Platforms) == 0 {
 		return BundleSpec{}, fmt.Errorf("bundle requires an ID and at least one tool")
 	}
-	entries, err := registry.LoadEmbedded()
-	if err != nil {
-		return BundleSpec{}, err
+	entries := s.Definitions
+	var err error
+	if entries == nil {
+		entries, err = registry.LoadEmbedded()
+		if err != nil {
+			return BundleSpec{}, err
+		}
 	}
-	catalog := NewCatalog(registry.Merge(entries, s.CustomTools))
+	catalog := NewCatalog(entries)
 	selected := map[string]bool{}
 	resolveSelection := func(selection ToolSelection) (ToolSelection, error) {
 		versions := make(ToolSelection, len(selection))
@@ -148,11 +151,10 @@ func (s BundleSpec) resolved() (BundleSpec, error) {
 		}
 		s.Platforms = platforms
 	}
-	definitions := s.CustomTools
-	s.CustomTools = nil
-	for _, entry := range definitions {
+	s.Definitions = nil
+	for _, entry := range entries {
 		if selected[entry.Name] {
-			s.CustomTools = append(s.CustomTools, entry)
+			s.Definitions = append(s.Definitions, entry)
 		}
 	}
 	return s, nil

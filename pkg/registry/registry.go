@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"net/url"
@@ -120,7 +121,7 @@ func (e ToolEntry) DownloadURL(version string) string {
 	return u
 }
 
-// LoadEmbedded loads Arsenal's unified tool catalog.
+// LoadEmbedded loads CRTM's default catalog for standalone use.
 func LoadEmbedded() ([]ToolEntry, error) {
 	return ParseYAML(embedded)
 }
@@ -128,8 +129,18 @@ func LoadEmbedded() ([]ToolEntry, error) {
 // ParseYAML parses a YAML file containing a list of ToolEntry.
 func ParseYAML(data []byte) ([]ToolEntry, error) {
 	var entries []ToolEntry
-	if err := yaml.Unmarshal(data, &entries); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&entries); err != nil {
 		return nil, err
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		name := strings.ToLower(entry.Name)
+		if name == "" || seen[name] {
+			return nil, fmt.Errorf("empty or duplicate tool name %q", entry.Name)
+		}
+		seen[name] = true
 	}
 	return entries, nil
 }

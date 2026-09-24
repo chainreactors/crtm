@@ -100,12 +100,14 @@ $ crtm -install-all
 ## Bundles for Go applications
 
 `crtm-bundle` downloads selected tools for an explicit target and packages their
-executables with version and SHA-256 metadata. Arsenal's [unified catalog](pkg/registry/arsenal.yaml)
-owns repository definitions, default bundle versions and supported platforms.
+executables with version and SHA-256 metadata. The application's catalog owns repository definitions, default bundle versions
+and supported platforms. CRTM includes a [default catalog](pkg/registry/arsenal.yaml)
+for standalone use.
 For example, create `bundle.yaml` containing only the tools an application needs:
 
 ```yaml
 id: my-application
+catalog: path/to/arsenal.yaml
 tools: [rg, ast-grep, osv-scanner]
 ```
 
@@ -117,15 +119,16 @@ GOOS=linux GOARCH=amd64 go build -tags arsenal_embed ./cmd/my-application
 ```
 
 The generated `EmbeddedBundle()` returns a `*pkg.Bundle`. Use the generated
-`ToolSpec.ManagerOption(bundle)` to configure the manager, then call `manager.Prepare(ctx, bundle)`
+`ToolSpec.ManagerOption(bundle)` to configure the manager, then call `manager.Prepare(ctx)`
 when initializing the tool environment. Construction stays read-only; preparation
 extracts missing tools without network access. Unmodified bundle-managed tools follow
 application upgrades; explicit user installations and edits are retained.
 
 Without `-package`, the command produces a standalone bundle directory. Open it with
 `pkg.OpenBundle(os.DirFS(path))`; the same Source implementation reads `embed.FS`.
-`pkg.BuildBundle` is the library entry point. Custom tools reuse the registry's
-`custom_tools` definitions in the YAML file. Names inherit catalog versions; a map
+`pkg.BuildBundle` is the library entry point. An external `catalog` is resolved relative to the selection file and completely
+replaces CRTM defaults. Resolved `BundleSpec.Definitions` contains only selected
+tools; inline `definitions` uses the same ToolEntry format. Names inherit catalog versions; a map
 such as `tools: {rg: "15.2.0"}` overrides versions for one application. If no default
 version is defined, or `latest` is requested, packaging resolves a fixed release.
 The bundle ID should remain stable between releases.
@@ -134,8 +137,8 @@ Bundle payloads contain executables only. Tools may still need their own externa
 templates, databases, or runtime libraries. Normal `UpdateTool` requests remote latest;
 source integrity errors fail directly instead of falling back to another source.
 
-Add tools for new scenarios to `pkg/registry/arsenal.yaml`, then select them by
-name in a release. Explicit platform mappings can override the asset filename;
+Add tools for new scenarios to the application's catalog, then select them by
+name in a release. No CRTM change is required. Explicit platform mappings can override the asset filename;
 empty platform entries use `asset_pattern`. Unlisted platforms fail before download.
 An optional external catalog uses the same list of tool entries:
 
@@ -156,3 +159,12 @@ as well as embedded builds and never modify the user's configuration.
 ## Thanks
 
 * https://github.com/projectdiscovery/pdtm ,  crtm modified from pdtm, thanks to pdtm's work
+
+The library uses `ManagerOption.Catalog` for a complete catalog (nil selects the
+CRTM default), replacing the former additive `Tools` option. User `custom_tools`
+still override the chosen catalog. `Prepare(ctx)` initializes bundles from the
+configured source chain without consulting remote sources. `Install(ctx, name,
+version, validate)` is the shared cancellable installation API: an empty version
+installs missing tools from the preferred source, a concrete version pins a
+release, and `latest` requests a remote refresh. Existing binaries survive failed
+downloads or validation.

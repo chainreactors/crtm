@@ -27,13 +27,13 @@ type Manager struct {
 type ManagerOption struct {
 	BinPath    string               // default ~/.crtm/bin
 	ConfigPath string               // default ~/.crtm/config.yaml
-	Tools      []registry.ToolEntry // distribution definitions; user config overrides these
+	Catalog    []registry.ToolEntry // complete catalog; nil uses CRTM defaults
 	// nil uses GitHub. A non-nil list is the complete ordered source chain.
 	Sources []Source
 }
 
-// NewManager loads the tool registry (embedded + user config) and builds
-// the catalog. No network calls.
+// NewManager opens the chosen catalog and local state without writes or network
+// access. User configuration overrides definitions in the chosen catalog.
 func NewManager(opt ManagerOption) (*Manager, error) {
 	if opt.ConfigPath == "" {
 		opt.ConfigPath = DefaultConfigPath()
@@ -42,9 +42,13 @@ func NewManager(opt ManagerOption) (*Manager, error) {
 		opt.BinPath = filepath.Join(DefaultConfigDir(), "bin")
 	}
 
-	embedded, err := registry.LoadEmbedded()
-	if err != nil {
-		return nil, fmt.Errorf("load embedded registry: %w", err)
+	entries := opt.Catalog
+	if entries == nil {
+		var err error
+		entries, err = registry.LoadEmbedded()
+		if err != nil {
+			return nil, fmt.Errorf("load embedded registry: %w", err)
+		}
 	}
 
 	cfg, err := LoadCRTMConfig(opt.ConfigPath)
@@ -52,7 +56,7 @@ func NewManager(opt ManagerOption) (*Manager, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	all := registry.Merge(registry.Merge(embedded, opt.Tools), cfg.CustomTools)
+	all := registry.Merge(entries, cfg.CustomTools)
 	sources := opt.Sources
 	if sources == nil {
 		sources = []Source{GitHubSource{}}
@@ -93,12 +97,12 @@ func (m *Manager) Search(query string) []registry.ToolEntry {
 
 // InstallTool installs from the first matching source (bundled or remote latest).
 func (m *Manager) InstallTool(name string) error {
-	return m.install(context.Background(), name, "", true, nil)
+	return m.Install(context.Background(), name, "", nil)
 }
 
 // UpdateTool re-downloads the latest (or specified) version.
 func (m *Manager) UpdateTool(name string) error {
-	return m.install(context.Background(), name, "latest", false, nil)
+	return m.Install(context.Background(), name, "latest", nil)
 }
 
 // RemoveTool deletes the binary and removes from manifest.
@@ -154,22 +158,16 @@ func (m *Manager) InstalledVersion(name string) string {
 // BinPath returns the binary installation directory.
 func (m *Manager) BinPath() string { return m.binPath }
 
-// InstallVersionContext installs a pinned release after validating the staged executable.
-// The existing binary is untouched if download, extraction or validation fails.
-func (m *Manager) InstallVersionContext(ctx context.Context, name, version string, validate func(context.Context, string) error) error {
-	if version == "" {
-		return fmt.Errorf("a pinned version is required")
-	}
-	return m.install(ctx, name, version, false, validate)
-}
-
-func (m *Manager) install(ctx context.Context, name, version string, onlyMissing bool, validate func(context.Context, string) error) error {
+// Install resolves an executable from the configured sources and validates it
+// before replacement. Empty version installs only missing tools; "latest" forces
+// a remote refresh. A concrete version selects that release, including bundles.
+func (m *Manager) Install(ctx context.Context, name, version string, validate func(context.Context, string) error) error {
 	entry, ok := m.catalog.Find(name)
 	if !ok {
 		return fmt.Errorf("tool %q not found in registry", name)
 	}
 	return m.withInstallLock(ctx, func() error {
-		if onlyMissing && m.isInstalled(entry.Name) {
+		if version == "" && m.isInstalled(entry.Name) {
 			return fmt.Errorf("%s: already installed", entry.Name)
 		}
 		a, err := resolve(ctx, m.sources, Request{entry, version, CurrentTarget()})
@@ -208,10 +206,22 @@ func (m *Manager) installArtifact(ctx context.Context, a Artifact, managedBy str
 	return m.manifest.put(a.Tool.Name, ManifestEntry{Version: a.Version, InstalledAt: time.Now(), Source: a.Source, ManagedBy: managedBy, SHA256: digest})
 }
 
-// Prepare restores missing tools and follows bundle revisions only while the
+// Prepare initializes bundles in the configured source chain. It restores
+// missing tools and follows bundle revisions only while the
 // previous installation is still owned by this bundle and has not been edited.
 // It never consults other sources or the network.
-func (m *Manager) Prepare(ctx context.Context, bundle *Bundle) error {
+func (m *Manager) Prepare(ctx context.Context) error {
+	for _, source := range m.sources {
+		if bundle, ok := source.(*Bundle); ok {
+			if err := m.prepareBundle(ctx, bundle); err != nil {
+				return err
+			}
+		}
+	}
+	return ctx.Err()
+}
+
+func (m *Manager) prepareBundle(ctx context.Context, bundle *Bundle) error {
 	if bundle == nil {
 		return nil
 	}

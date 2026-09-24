@@ -25,7 +25,7 @@ type BundleSpec struct {
 	Catalog     string                   `yaml:"catalog,omitempty"`
 	Tools       ToolSelection            `yaml:"tools"`
 	Platforms   map[string]ToolSelection `yaml:"platforms,omitempty"`
-	CustomTools []registry.ToolEntry     `yaml:"custom_tools,omitempty"`
+	Definitions []registry.ToolEntry     `yaml:"definitions,omitempty"`
 }
 
 type bundleManifest struct {
@@ -123,11 +123,7 @@ func BuildBundle(ctx context.Context, spec BundleSpec, target Target, output str
 	if len(selected) == 0 {
 		return "", fmt.Errorf("bundle has no tools for %s", target)
 	}
-	entries, err := registry.LoadEmbedded()
-	if err != nil {
-		return "", err
-	}
-	catalog := NewCatalog(registry.Merge(entries, spec.CustomTools))
+	catalog := NewCatalog(spec.Definitions)
 	if len(sources) == 0 {
 		sources = []Source{GitHubSource{}}
 	}

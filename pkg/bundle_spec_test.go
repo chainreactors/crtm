@@ -28,7 +28,6 @@ func TestSharedCatalogSelection(t *testing.T) {
 id: release
 catalog: ../arsenal.yaml
 tools:
-  gogo: "1.1.0"
   selected:
 `), 0644))
 	spec, err := LoadBundleSpec(selection)
@@ -36,8 +35,8 @@ tools:
 	require.NoError(t, spec.Validate())
 	require.Equal(t, "release", spec.ID)
 	require.Empty(t, spec.Catalog)
-	require.Equal(t, ToolSelection{"gogo": "1.1.0", "selected": "2.0.0"}, spec.Tools)
-	require.Equal(t, []registry.ToolEntry{{Name: "selected", Version: "2.0.0", Repo: "example/selected", AssetPattern: "{name}_{os}_{arch}"}}, spec.CustomTools)
+	require.Equal(t, ToolSelection{"selected": "2.0.0"}, spec.Tools)
+	require.Equal(t, []registry.ToolEntry{{Name: "selected", Version: "2.0.0", Repo: "example/selected", AssetPattern: "{name}_{os}_{arch}"}}, spec.Definitions)
 
 	// Remote-only installations also know the selected custom definition, without
 	// writing it into user configuration or leaking unselected tools.
@@ -50,8 +49,14 @@ tools:
 	require.Equal(t, "example/selected", entry.Repo)
 	_, ok = mgr.Catalog().Find("unselected")
 	require.False(t, ok)
+	_, ok = mgr.Catalog().Find("gogo")
+	require.False(t, ok, "explicit catalogs must not inherit CRTM defaults")
 	_, err = os.Stat(opt.ConfigPath)
 	require.True(t, os.IsNotExist(err))
+
+	require.NoError(t, os.WriteFile(selection, []byte("id: release\ncatalog: ../arsenal.yaml\ntools: [gogo]\n"), 0644))
+	_, err = LoadBundleSpec(selection)
+	require.ErrorContains(t, err, `unknown tool "gogo"`)
 
 	require.NoError(t, os.WriteFile(selection, []byte("id: release\ncatalog: ../arsenal.yaml\ntools:\n  unknown:\n"), 0644))
 	_, err = LoadBundleSpec(selection)
@@ -100,7 +105,10 @@ platforms:
     shared-tool:
     second-tool:
     rg: "15.3.0"
-custom_tools:
+definitions:
+  - name: rg
+    version: 15.2.0
+    repo: example/rg
   - name: windows-tool
     version: 6.2.2
     repo: example/windows-tool
@@ -116,7 +124,7 @@ custom_tools:
 	spec, err := LoadBundleSpec(path)
 	require.NoError(t, err)
 	require.NoError(t, spec.Validate())
-	require.Len(t, spec.CustomTools, 3)
+	require.Len(t, spec.Definitions, 4)
 	for _, test := range []struct {
 		target Target
 		tools  ToolSelection
@@ -157,10 +165,10 @@ custom_tools:
 
 func TestPlatformOnlyCustomTool(t *testing.T) {
 	spec := BundleSpec{ID: "custom", Platforms: map[string]ToolSelection{"linux/amd64": {"local": ""}},
-		CustomTools: []registry.ToolEntry{{Name: "local", Version: "1.0.0", Repo: "example/local"}}}
+		Definitions: []registry.ToolEntry{{Name: "local", Version: "1.0.0", Repo: "example/local"}}}
 	resolved, err := spec.resolved()
 	require.NoError(t, err)
-	require.Len(t, resolved.CustomTools, 1)
+	require.Len(t, resolved.Definitions, 1)
 	require.Equal(t, "1.0.0", resolved.ToolsFor(Target{"linux", "amd64"})["local"])
 	_, err = BuildBundle(context.Background(), spec, Target{"windows", "amd64"}, t.TempDir(), fixtureSource(nil))
 	require.ErrorContains(t, err, "no tools")

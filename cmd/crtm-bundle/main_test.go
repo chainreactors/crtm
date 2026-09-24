@@ -57,7 +57,7 @@ func TestGeneratedEmbedBuildAndRun(t *testing.T) {
 		other = crtm.Target{GOOS: "windows", GOARCH: "amd64"}
 	}
 	spec := crtm.BundleSpec{ID: "fixture-app", Tools: map[string]string{"fixture-tool": "1.0.0"},
-		Platforms: map[string]crtm.ToolSelection{other.String(): {"cross-tool": "2.0.0"}}, CustomTools: []registry.ToolEntry{
+		Platforms: map[string]crtm.ToolSelection{other.String(): {"cross-tool": "2.0.0"}}, Definitions: []registry.ToolEntry{
 			{Name: "cross-tool", Repo: "example/cross-tool"},
 			{Name: "fixture-tool", Repo: "example/fixture", AssetPattern: "{name}_{os}_{arch}", Platforms: map[string]registry.PlatformAsset{
 				"linux/arm64": {Asset: "fixture-linux-arm64"},
@@ -90,7 +90,7 @@ func main() {
  options := ToolSpec.ManagerOption(b)
  options.BinPath, options.ConfigPath = filepath.Join(os.Args[1],"bin"), filepath.Join(os.Args[1],"config.yaml")
  m, err := crtm.NewManager(options)
- if err != nil { panic(err) }; if err = m.Prepare(context.Background(),b); err != nil { panic(err) }
+ if err != nil { panic(err) }; if err = m.Prepare(context.Background()); err != nil { panic(err) }
  c:=exec.Command(filepath.Join(m.BinPath(),crtm.BinaryName("fixture-tool"))); c.Stdout=os.Stdout; c.Stderr=os.Stderr
  if err=c.Run(); err!=nil { panic(err) }
 }`

@@ -112,7 +112,7 @@ func (m *Manager) ListAssets(name, version string) ([]AssetInfo, error) {
 
 // InstallVersion downloads and installs a specific version of a tool.
 func (m *Manager) InstallVersion(name, version string) error {
-	return m.install(context.Background(), name, version, false, nil)
+	return m.Install(context.Background(), name, version, nil)
 }
 
 // DownloadTo downloads a tool to a custom directory (not the default bin).

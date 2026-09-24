@@ -7,6 +7,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCatalogRejectsAmbiguousDefinitions(t *testing.T) {
+	for _, data := range []string{
+		"- name: tool\n  asset_patern: example.zip\n",
+		"- name: tool\n- name: TOOL\n",
+		"- repo: example/unnamed\n",
+	} {
+		_, err := ParseYAML([]byte(data))
+		require.Error(t, err)
+	}
+}
+
 func TestLoadEmbedded(t *testing.T) {
 	entries, err := LoadEmbedded()
 	require.NoError(t, err)
