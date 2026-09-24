@@ -1,9 +1,10 @@
 package pkg
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/chainreactors/crtm/pkg/registry"
@@ -74,11 +75,11 @@ func (m *Manager) ListReleases(name string) ([]ReleaseInfo, error) {
 		return nil, fmt.Errorf("tool %q not found in registry", name)
 	}
 
-	version, err := ResolveLatestVersion(entry.Repo)
+	release, err := ResolveLatestRelease(context.Background(), entry.Repo)
 	if err != nil {
 		return nil, err
 	}
-	tag := "v" + version
+	version, tag := release.Version, release.Tag
 	return []ReleaseInfo{{
 		Version: version,
 		Tag:     tag,
@@ -111,16 +112,7 @@ func (m *Manager) ListAssets(name, version string) ([]AssetInfo, error) {
 
 // InstallVersion downloads and installs a specific version of a tool.
 func (m *Manager) InstallVersion(name, version string) error {
-	entry, ok := m.catalog.Find(name)
-	if !ok {
-		return fmt.Errorf("tool %q not found in registry", name)
-	}
-	resolved, err := m.downloadAndInstall(entry, version)
-	if err != nil {
-		return err
-	}
-	m.manifest.Set(name, resolved)
-	return nil
+	return m.install(context.Background(), name, version, false, nil)
 }
 
 // DownloadTo downloads a tool to a custom directory (not the default bin).
@@ -130,14 +122,18 @@ func (m *Manager) DownloadTo(name, version, destDir string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("tool %q not found in registry", name)
 	}
-	if err := DownloadAndInstall(entry, version, destDir); err != nil {
+	ctx := context.Background()
+	a, err := resolve(ctx, m.sources, Request{entry, version, CurrentTarget()})
+	if err != nil {
 		return "", err
 	}
-	binName := name
-	if runtime.GOOS == "windows" {
-		binName += ".exe"
+	staged, _, err := stageArtifact(ctx, a, destDir, nil)
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(destDir, binName), nil
+	defer os.Remove(staged)
+	target := filepath.Join(destDir, BinaryName(entry.Name))
+	return target, replaceBinary(staged, target)
 }
 
 // InstallFromRepo downloads and installs a tool from an arbitrary GitHub
@@ -150,12 +146,15 @@ func (m *Manager) InstallFromRepo(repo, assetPattern, version string) (string, e
 		Repo:         repo,
 		AssetPattern: assetPattern,
 	}
-	resolved, err := m.downloadAndInstall(entry, version)
-	if err != nil {
-		return "", err
-	}
-	m.manifest.Set(name, resolved)
-	return m.binaryPath(name), nil
+	ctx := context.Background()
+	err := m.withInstallLock(ctx, func() error {
+		a, err := resolve(ctx, m.sources, Request{entry, version, CurrentTarget()})
+		if err != nil {
+			return err
+		}
+		return m.installArtifact(ctx, a, "", nil)
+	})
+	return m.binaryPath(name), err
 }
 
 // ResolveVersion exposes version resolution for a registered tool.

@@ -19,15 +19,17 @@ type Manifest struct {
 type ManifestEntry struct {
 	Version     string    `json:"version"`
 	InstalledAt time.Time `json:"installed_at"`
+	Source      string    `json:"source,omitempty"`
+	ManagedBy   string    `json:"managed_by,omitempty"`
+	SHA256      string    `json:"sha256,omitempty"`
 }
 
-func newManifest(dir string) *Manifest {
+func newManifest(dir string) (*Manifest, error) {
 	m := &Manifest{
 		path:    filepath.Join(dir, "manifest.json"),
 		entries: make(map[string]ManifestEntry),
 	}
-	m.load()
-	return m
+	return m, m.load()
 }
 
 func (m *Manifest) Get(name string) (ManifestEntry, bool) {
@@ -37,21 +39,38 @@ func (m *Manifest) Get(name string) (ManifestEntry, bool) {
 	return e, ok
 }
 
-func (m *Manifest) Set(name, version string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.entries[name] = ManifestEntry{
-		Version:     version,
-		InstalledAt: time.Now(),
-	}
-	m.save()
+func (m *Manifest) Set(name, version string) error {
+	return m.put(name, ManifestEntry{Version: version, InstalledAt: time.Now()})
 }
 
-func (m *Manifest) Delete(name string) {
+func (m *Manifest) put(name string, entry ManifestEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	old, existed := m.entries[name]
+	m.entries[name] = entry
+	if err := m.save(); err != nil {
+		if existed {
+			m.entries[name] = old
+		} else {
+			delete(m.entries, name)
+		}
+		return err
+	}
+	return nil
+}
+
+func (m *Manifest) Delete(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old, existed := m.entries[name]
 	delete(m.entries, name)
-	m.save()
+	if err := m.save(); err != nil {
+		if existed {
+			m.entries[name] = old
+		}
+		return err
+	}
+	return nil
 }
 
 func (m *Manifest) All() map[string]ManifestEntry {
@@ -64,19 +83,32 @@ func (m *Manifest) All() map[string]ManifestEntry {
 	return out
 }
 
-func (m *Manifest) load() {
+func (m *Manifest) load() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	data, err := os.ReadFile(m.path)
-	if err != nil {
-		return
+	if os.IsNotExist(err) {
+		m.entries = make(map[string]ManifestEntry)
+		return nil
 	}
-	_ = json.Unmarshal(data, &m.entries)
+	if err != nil {
+		return err
+	}
+	entries := make(map[string]ManifestEntry)
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return err
+	}
+	if entries == nil {
+		entries = make(map[string]ManifestEntry)
+	}
+	m.entries = entries
+	return nil
 }
 
-func (m *Manifest) save() {
-	_ = os.MkdirAll(filepath.Dir(m.path), 0o755)
+func (m *Manifest) save() error {
 	data, err := json.MarshalIndent(m.entries, "", "  ")
 	if err != nil {
-		return
+		return err
 	}
-	_ = os.WriteFile(m.path, data, 0o644)
+	return writeAtomic(m.path, data, 0o644)
 }

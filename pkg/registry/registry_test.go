@@ -111,3 +111,35 @@ func TestParseYAML(t *testing.T) {
 	require.Equal(t, "mytool", entries[0].Name)
 	require.Equal(t, "myorg/mytool", entries[0].Repo)
 }
+
+func TestAuditPlatformMatrix(t *testing.T) {
+	entries, err := LoadEmbedded()
+	require.NoError(t, err)
+	for _, e := range entries {
+		if e.Category != "audit" {
+			continue
+		}
+		for _, goos := range []string{"windows", "linux", "darwin"} {
+			for _, arch := range []string{"amd64", "arm64"} {
+				asset, executable, err := e.AssetFor("1.2.3", goos, arch)
+				require.NoError(t, err)
+				require.NotContains(t, asset, "{")
+				require.NotEmpty(t, executable)
+				if goos == "windows" {
+					require.Contains(t, executable, ".exe")
+				}
+				tag := e.ReleaseTag("1.2.3")
+				if e.Name == "osv-scanner" {
+					require.Equal(t, "v1.2.3", tag)
+				} else {
+					require.Equal(t, "1.2.3", tag)
+				}
+				u, err := e.ReleaseURL(tag, "1.2.3", goos, arch)
+				require.NoError(t, err)
+				require.Contains(t, u, "/"+tag+"/"+asset)
+			}
+		}
+		_, _, err := e.AssetFor("1.2.3", "freebsd", "amd64")
+		require.Error(t, err)
+	}
+}

@@ -3,6 +3,7 @@ package registry
 import (
 	"embed"
 	"fmt"
+	"net/url"
 	"runtime"
 	"strings"
 
@@ -23,6 +24,62 @@ type ToolEntry struct {
 	Category     string   `yaml:"category,omitempty" json:"category,omitempty"`
 	DocsURL      string   `yaml:"docs_url,omitempty" json:"docs_url,omitempty"`
 	Hint         string   `yaml:"hint,omitempty" json:"hint,omitempty"`
+	// TagPattern defaults to v{version} for the existing registries.
+	TagPattern string                   `yaml:"tag_pattern,omitempty" json:"tag_pattern,omitempty"`
+	Executable string                   `yaml:"executable,omitempty" json:"executable,omitempty"`
+	Platforms  map[string]PlatformAsset `yaml:"platforms,omitempty" json:"platforms,omitempty"`
+}
+
+// PlatformAsset selects a release artifact by GOOS/GOARCH.
+type PlatformAsset struct {
+	Asset      string `yaml:"asset" json:"asset"`
+	Executable string `yaml:"executable,omitempty" json:"executable,omitempty"`
+}
+
+func (e ToolEntry) AssetFor(version, goos, goarch string) (string, string, error) {
+	pattern, executable := e.AssetPattern, e.Executable
+	if len(e.Platforms) > 0 {
+		platform, ok := e.Platforms[goos+"/"+goarch]
+		if !ok {
+			return "", "", fmt.Errorf("%s: unsupported platform %s/%s", e.Name, goos, goarch)
+		}
+		pattern = platform.Asset
+		if platform.Executable != "" {
+			executable = platform.Executable
+		}
+	}
+	if executable == "" {
+		executable = e.Name
+	}
+	if goos == "windows" && !strings.HasSuffix(executable, ".exe") {
+		executable += ".exe"
+	}
+	osName := goos
+	if goos == "darwin" {
+		osName = "macOS"
+	}
+	asset := strings.NewReplacer("{name}", e.Name, "{version}", version, "{os}", osName, "{arch}", goarch).Replace(pattern)
+	return strings.ReplaceAll(asset, "__", "_"), executable, nil
+}
+
+// ReleaseURL keeps the exact GitHub tag distinct from the version in filenames.
+func (e ToolEntry) ReleaseURL(tag, version, goos, goarch string) (string, error) {
+	asset, _, err := e.AssetFor(version, goos, goarch)
+	if err != nil {
+		return "", err
+	}
+	if tag == "" {
+		return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", e.Repo, asset), nil
+	}
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", e.Repo, url.PathEscape(tag), asset), nil
+}
+
+func (e ToolEntry) ReleaseTag(version string) string {
+	pattern := e.TagPattern
+	if pattern == "" {
+		pattern = "v{version}"
+	}
+	return strings.ReplaceAll(pattern, "{version}", strings.TrimPrefix(version, "v"))
 }
 
 // Org returns the GitHub organization from the Repo field.
@@ -45,43 +102,25 @@ func (e ToolEntry) RepoName() string {
 // platform. The pattern supports placeholders: {name}, {version}, {os}, {arch}.
 // If version is empty, the "_{version}" segment is omitted (for latest-only patterns).
 func (e ToolEntry) AssetName(version string) string {
-	osName := runtime.GOOS
-	if osName == "darwin" {
-		osName = "macOS"
-	}
-	arch := runtime.GOARCH
-
-	r := strings.NewReplacer(
-		"{name}", e.Name,
-		"{version}", version,
-		"{os}", osName,
-		"{arch}", arch,
-	)
-	result := r.Replace(e.AssetPattern)
-
-	// Clean up double separators if version was empty.
-	result = strings.ReplaceAll(result, "__", "_")
-	return result
+	asset, _, _ := e.AssetFor(version, runtime.GOOS, runtime.GOARCH)
+	return asset
 }
 
 // DownloadURL returns the direct GitHub release download URL.
 // If version is empty, uses /releases/latest/download/ which auto-resolves.
 func (e ToolEntry) DownloadURL(version string) string {
-	asset := e.AssetName(version)
-	if version == "" {
-		return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", e.Repo, asset)
+	tag := ""
+	if version != "" {
+		tag = e.ReleaseTag(version)
 	}
-	tag := version
-	if !strings.HasPrefix(tag, "v") {
-		tag = "v" + tag
-	}
-	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", e.Repo, tag, asset)
+	u, _ := e.ReleaseURL(tag, strings.TrimPrefix(version, "v"), runtime.GOOS, runtime.GOARCH)
+	return u
 }
 
 // LoadEmbedded loads the built-in CR + PD tool registries.
 func LoadEmbedded() ([]ToolEntry, error) {
 	var all []ToolEntry
-	for _, name := range []string{"chainreactors.yaml", "projectdiscovery.yaml"} {
+	for _, name := range []string{"chainreactors.yaml", "projectdiscovery.yaml", "audit.yaml"} {
 		data, err := embedded.ReadFile(name)
 		if err != nil {
 			return nil, fmt.Errorf("read embedded %s: %w", name, err)

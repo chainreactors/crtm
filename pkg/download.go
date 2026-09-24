@@ -5,351 +5,293 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/chainreactors/crtm/pkg/registry"
-	"github.com/projectdiscovery/gologger"
 )
 
-var httpClient = &http.Client{
-	Timeout: 5 * time.Minute,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return fmt.Errorf("too many redirects")
-		}
-		return nil
-	},
-}
+var httpClient = &http.Client{Timeout: 5 * time.Minute}
+var noFollowClient = &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-var noFollowClient = &http.Client{
-	Timeout:       15 * time.Second,
-	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-}
+// Release retains the original tag, including prefixes and nested paths.
+type Release struct{ Tag, Version string }
 
-// DownloadAndInstall fetches the tool binary via direct GitHub release URL
-// and extracts it to binPath.
-func DownloadAndInstall(entry registry.ToolEntry, version, binPath string) error {
-	version, err := ResolveVersionIfNeeded(entry, version)
+func ResolveLatestRelease(ctx context.Context, repo string) (Release, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, "https://github.com/"+repo+"/releases/latest", nil)
 	if err != nil {
-		return err
+		return Release{}, err
 	}
-
-	url, err := FindDownloadURL(entry, version)
+	resp, err := noFollowClient.Do(req)
 	if err != nil {
-		return err
+		return Release{}, err
 	}
-
-	gologger.Info().Msgf("downloading %s from %s", entry.Name, url)
-	data, err := HTTPGet(url)
-	if err != nil {
-		return fmt.Errorf("download %s: %w", entry.Name, err)
-	}
-
-	if err := os.MkdirAll(binPath, 0o755); err != nil {
-		return err
-	}
-
-	if err := ExtractBinary(data, entry.Name, binPath); err != nil {
-		return fmt.Errorf("extract %s: %w", entry.Name, err)
-	}
-
-	gologger.Info().Msgf("installed %s to %s", entry.Name, binPath)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Version resolution (public helpers)
-// ---------------------------------------------------------------------------
-
-// ResolveLatestVersion does a HEAD on /releases/latest and extracts the
-// version tag from the 302 redirect. No GitHub API call.
-func ResolveLatestVersion(repo string) (string, error) {
-	url := fmt.Sprintf("https://github.com/%s/releases/latest", repo)
-	resp, err := noFollowClient.Head(url)
-	if err != nil {
-		return "", fmt.Errorf("HEAD %s: %w", url, err)
-	}
-	resp.Body.Close()
-
+	defer resp.Body.Close()
 	loc := resp.Header.Get("Location")
-	if loc == "" {
-		return "", fmt.Errorf("no redirect from %s (HTTP %d)", url, resp.StatusCode)
+	_, tag, ok := strings.Cut(loc, "/releases/tag/")
+	if !ok || tag == "" {
+		return Release{}, fmt.Errorf("invalid latest release redirect (HTTP %d): %s", resp.StatusCode, loc)
 	}
-	// Location: https://github.com/ffuf/ffuf/releases/tag/v2.1.0
-	if i := strings.LastIndex(loc, "/"); i >= 0 {
-		tag := loc[i+1:]
-		return strings.TrimPrefix(tag, "v"), nil
+	tag, err = url.PathUnescape(tag)
+	if err != nil {
+		return Release{}, err
 	}
-	return "", fmt.Errorf("cannot parse version from redirect: %s", loc)
+	return Release{Tag: tag, Version: strings.TrimPrefix(path.Base(tag), "v")}, nil
 }
 
-// ResolveVersionIfNeeded auto-resolves the latest version when the asset
-// pattern contains {version} and no version was provided.
+func ResolveLatestVersion(repo string) (string, error) {
+	release, err := ResolveLatestRelease(context.Background(), repo)
+	return release.Version, err
+}
+
 func ResolveVersionIfNeeded(entry registry.ToolEntry, version string) (string, error) {
-	if version != "" || !strings.Contains(entry.AssetPattern, "{version}") {
+	if version != "" {
 		return version, nil
 	}
-	resolved, err := ResolveLatestVersion(entry.Repo)
-	if err != nil {
-		return "", fmt.Errorf("resolve latest version for %s: %w", entry.Name, err)
+	asset := entry.AssetName("{version}")
+	if !strings.Contains(asset, "{version}") {
+		return "", nil
 	}
-	gologger.Info().Msgf("resolved %s latest version: %s", entry.Name, resolved)
-	return resolved, nil
+	return ResolveLatestVersion(entry.Repo)
 }
 
-// ---------------------------------------------------------------------------
-// URL probing (public helpers)
-// ---------------------------------------------------------------------------
-
-// FindDownloadURL tries the primary asset name, then probes common suffixes.
-func FindDownloadURL(entry registry.ToolEntry, version string) (string, error) {
-	primary := entry.DownloadURL(version)
-
-	if hasArchiveExt(entry.AssetPattern) {
-		if URLOK(primary) {
-			return primary, nil
+func DownloadAndInstall(entry registry.ToolEntry, version, binPath string) error {
+	release := Release{Version: strings.TrimPrefix(version, "v")}
+	if version != "" {
+		release.Tag = entry.ReleaseTag(version)
+	} else {
+		var err error
+		release, err = ResolveLatestRelease(context.Background(), entry.Repo)
+		if err != nil {
+			return err
 		}
-		// Try with os alias (macOS ↔ darwin).
-		if alt := osAliasURL(entry, version); alt != "" && URLOK(alt) {
-			return alt, nil
-		}
-		return "", fmt.Errorf("asset not found: %s", primary)
 	}
+	return InstallRelease(context.Background(), entry, release, binPath, nil)
+}
 
-	// No extension in pattern — probe raw, .tar.gz, .zip.
-	for _, suffix := range []string{"", ".tar.gz", ".zip"} {
-		u := primary + suffix
-		if URLOK(u) {
+// InstallRelease stages, validates and atomically replaces one executable.
+// A failed installation never removes an existing version.
+func InstallRelease(ctx context.Context, entry registry.ToolEntry, release Release, binPath string, validate func(context.Context, string) error) error {
+	staged, _, err := stageArtifact(ctx, releaseArtifact(entry, release, CurrentTarget()), binPath, validate)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(staged)
+	return replaceBinary(staged, filepath.Join(binPath, BinaryName(entry.Name)))
+}
+
+// DownloadRelease downloads and extracts an executable for an explicit target.
+// It does not execute the result, so build tools can use it when cross-compiling.
+func DownloadRelease(ctx context.Context, entry registry.ToolEntry, release Release, goos, goarch string) ([]byte, error) {
+	if entry.Name == "" || filepath.Base(entry.Name) != entry.Name || strings.ContainsAny(entry.Name, `/\\`) || entry.Name == "." || entry.Name == ".." {
+		return nil, fmt.Errorf("invalid tool name %q", entry.Name)
+	}
+	_, executable, err := entry.AssetFor(release.Version, goos, goarch)
+	if err != nil {
+		return nil, err
+	}
+	downloadURL, err := findReleaseURLFor(ctx, entry, release, goos, goarch)
+	if err != nil {
+		return nil, err
+	}
+	data, err := httpGet(ctx, downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("download %s: %w", entry.Name, err)
+	}
+	body, err := binaryFromArchive(data, executable)
+	if err != nil {
+		return nil, fmt.Errorf("extract %s: %w", entry.Name, err)
+	}
+	if !isExecutableFor(body, goos) {
+		return nil, fmt.Errorf("%s: release asset is not a %s executable", entry.Name, goos)
+	}
+	return body, nil
+}
+
+func BinaryName(name string) string {
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		return name + ".exe"
+	}
+	return name
+}
+
+func FindDownloadURL(entry registry.ToolEntry, version string) (string, error) {
+	release := Release{Version: strings.TrimPrefix(version, "v")}
+	if version != "" {
+		release.Tag = entry.ReleaseTag(version)
+	}
+	return findReleaseURL(context.Background(), entry, release)
+}
+
+func findReleaseURL(ctx context.Context, entry registry.ToolEntry, release Release) (string, error) {
+	return findReleaseURLFor(ctx, entry, release, runtime.GOOS, runtime.GOARCH)
+}
+
+func findReleaseURLFor(ctx context.Context, entry registry.ToolEntry, release Release, goos, goarch string) (string, error) {
+	primary, err := entry.ReleaseURL(release.Tag, release.Version, goos, goarch)
+	if err != nil {
+		return "", err
+	}
+	// Explicit platform mappings are exact; old third-party patterns retain suffix probing.
+	if len(entry.Platforms) > 0 || hasArchiveExt(primary) {
+		return primary, nil
+	}
+	candidates := []string{primary, primary + ".tar.gz", primary + ".zip"}
+	if goos == "darwin" {
+		for _, u := range append([]string(nil), candidates...) {
+			candidates = append(candidates, strings.ReplaceAll(u, "macOS", "darwin"))
+		}
+	}
+	for _, u := range candidates {
+		if urlOK(ctx, u) {
 			return u, nil
 		}
 	}
-	// Try os alias.
-	if alt := osAliasURL(entry, version); alt != "" {
-		for _, suffix := range []string{"", ".tar.gz", ".zip"} {
-			u := alt + suffix
-			if URLOK(u) {
-				return u, nil
-			}
-		}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("no downloadable asset for %s (tried %s +.tar.gz +.zip)", entry.Name, primary)
+	return "", fmt.Errorf("no release asset for %s at %s", entry.Name, primary)
 }
 
-// URLOK does a HEAD to check reachability.
-func URLOK(url string) bool {
-	resp, err := httpClient.Head(url)
+func URLOK(u string) bool { return urlOK(context.Background(), u) }
+func urlOK(ctx context.Context, u string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
 }
-
-// HTTPGet fetches a URL and returns the body bytes.
-func HTTPGet(url string) ([]byte, error) {
-	resp, err := httpClient.Get(url)
+func HTTPGet(u string) ([]byte, error) { return httpGet(context.Background(), u) }
+func httpGet(ctx context.Context, u string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, u)
 	}
-	return io.ReadAll(resp.Body)
+	return readBounded(resp.Body)
+}
+func readBounded(r io.Reader) ([]byte, error) {
+	const limit = MaxBinarySize
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if len(data) > limit {
+		return nil, fmt.Errorf("release executable exceeds 512 MiB")
+	}
+	return data, err
+}
+func hasArchiveExt(p string) bool {
+	p = strings.ToLower(p)
+	return strings.HasSuffix(p, ".tar.gz") || strings.HasSuffix(p, ".tgz") || strings.HasSuffix(p, ".zip")
 }
 
-func hasArchiveExt(pattern string) bool {
-	p := strings.ToLower(pattern)
-	return strings.HasSuffix(p, ".tar.gz") || strings.HasSuffix(p, ".tgz") ||
-		strings.HasSuffix(p, ".zip") || strings.HasSuffix(p, ".gz") ||
-		strings.HasSuffix(p, ".xz") || strings.HasSuffix(p, ".bz2")
-}
-
-func osAliasURL(entry registry.ToolEntry, version string) string {
-	osName := runtime.GOOS
-	var alias string
-	switch osName {
-	case "darwin":
-		alias = "macOS"
-	case "linux":
-		return "" // no common alias
-	default:
-		return ""
-	}
-	alt := registry.ToolEntry{
-		Name:         entry.Name,
-		Repo:         entry.Repo,
-		AssetPattern: strings.ReplaceAll(entry.AssetPattern, "{os}", alias),
-	}
-	return alt.DownloadURL(version)
-}
-
-// ---------------------------------------------------------------------------
-// Archive extraction (public, strong tolerance)
-// ---------------------------------------------------------------------------
-
-// ExtractBinary auto-detects archive format by magic bytes and extracts
-// the tool binary. It tolerates:
-//   - binary in subdirectories
-//   - binary name with .exe suffix
-//   - archive containing a single executable (fallback)
+// ExtractBinary selects only the requested executable. It never guesses using file size.
 func ExtractBinary(data []byte, toolName, binPath string) error {
-	// Zip (PK magic).
-	if len(data) > 4 && data[0] == 'P' && data[1] == 'K' {
-		return extractZip(data, toolName, binPath)
-	}
-	// Gzip (1f 8b magic) — likely tar.gz.
-	if len(data) > 2 && data[0] == 0x1f && data[1] == 0x8b {
-		return extractTarGz(data, toolName, binPath)
-	}
-	// Raw binary.
-	return writeBinaryFile(bytes.NewReader(data), toolName, binPath)
-}
-
-func extractZip(data []byte, toolName, binPath string) error {
-	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	body, err := binaryFromArchive(data, BinaryName(toolName))
 	if err != nil {
 		return err
 	}
-
-	// Pass 1: exact name match (case-insensitive, any directory depth).
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
-			continue
+	if err := os.MkdirAll(binPath, 0755); err != nil {
+		return err
+	}
+	if filepath.Base(toolName) != toolName || strings.ContainsAny(toolName, `/\\`) || toolName == "." || toolName == ".." || toolName == "" {
+		return fmt.Errorf("invalid tool name")
+	}
+	return os.WriteFile(filepath.Join(binPath, BinaryName(toolName)), body, 0755)
+}
+func binaryFromArchive(data []byte, executable string) ([]byte, error) {
+	var found []byte
+	accept := func(name string, r io.Reader) error {
+		if path.Base(strings.ReplaceAll(name, "\\", "/")) != executable {
+			return nil
 		}
-		if isBinaryMatch(filepath.Base(f.Name), toolName) {
-			rc, err := f.Open()
-			if err != nil {
-				return err
+		if found != nil {
+			return fmt.Errorf("ambiguous executable %q in archive", executable)
+		}
+		var err error
+		found, err = readBounded(r)
+		return err
+	}
+	switch {
+	case len(data) > 4 && bytes.HasPrefix(data, []byte("PK")):
+		archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range archive.File {
+			if !file.Mode().IsRegular() {
+				continue
 			}
-			err = writeBinaryFile(rc, toolName, binPath)
-			rc.Close()
-			return err
+			r, err := file.Open()
+			if err != nil {
+				return nil, err
+			}
+			err = accept(file.Name, r)
+			r.Close()
+			if err != nil {
+				return nil, err
+			}
 		}
-	}
-
-	// Pass 2: largest executable-looking file as fallback.
-	return extractLargestFromZip(r, toolName, binPath)
-}
-
-func extractTarGz(data []byte, toolName, binPath string) error {
-	// We need two passes, so buffer the tar entries.
-	type tarEntry struct {
-		name string
-		size int64
-		data []byte
-	}
-
-	gz, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-
-	var entries []tarEntry
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
+	case len(data) > 2 && data[0] == 0x1f && data[1] == 0x8b:
+		gz, err := gzip.NewReader(bytes.NewReader(data))
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
+		defer gz.Close()
+		tr := tar.NewReader(gz)
+		for {
+			header, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			if header.Typeflag == tar.TypeReg {
+				if err := accept(header.Name, tr); err != nil {
+					return nil, err
+				}
+			}
 		}
-		body, err := io.ReadAll(tr)
-		if err != nil {
-			return err
-		}
-		entries = append(entries, tarEntry{
-			name: hdr.Name,
-			size: hdr.Size,
-			data: body,
-		})
+	default:
+		return data, nil
 	}
-
-	// Pass 1: exact match.
-	for _, e := range entries {
-		if isBinaryMatch(filepath.Base(e.name), toolName) {
-			return writeBinaryFile(bytes.NewReader(e.data), toolName, binPath)
-		}
+	if len(found) == 0 {
+		return nil, fmt.Errorf("executable %q not found in archive", executable)
 	}
-
-	// Pass 2: largest file.
-	if len(entries) == 0 {
-		return fmt.Errorf("binary %q not found in tar.gz (archive is empty)", toolName)
-	}
-	largest := entries[0]
-	for _, e := range entries[1:] {
-		if e.size > largest.size {
-			largest = e
-		}
-	}
-	if largest.size < 1024 {
-		return fmt.Errorf("binary %q not found in tar.gz (no suitable file)", toolName)
-	}
-	return writeBinaryFile(bytes.NewReader(largest.data), toolName, binPath)
+	return found, nil
 }
-
-func extractLargestFromZip(r *zip.Reader, toolName, binPath string) error {
-	var best *zip.File
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		if best == nil || f.UncompressedSize64 > best.UncompressedSize64 {
-			best = f
-		}
+func isExecutableFor(data []byte, goos string) bool {
+	if len(data) < 4 {
+		return false
 	}
-	if best == nil || best.UncompressedSize64 < 1024 {
-		return fmt.Errorf("binary %q not found in zip (no suitable file)", toolName)
-	}
-	rc, err := best.Open()
-	if err != nil {
-		return err
-	}
-	err = writeBinaryFile(rc, toolName, binPath)
-	rc.Close()
-	return err
-}
-
-// isBinaryMatch checks if a filename in an archive matches the expected
-// tool binary name. Tolerates: case differences, .exe suffix, version
-// suffixes like "ffuf_2.1.0" matching "ffuf".
-func isBinaryMatch(filename, toolName string) bool {
-	clean := strings.TrimSuffix(filename, ".exe")
-	if strings.EqualFold(clean, toolName) {
-		return true
-	}
-	// Handle: "toolName_version" or "toolName-version" or "toolName.version"
-	for _, sep := range []string{"_", "-", "."} {
-		if strings.HasPrefix(strings.ToLower(clean), strings.ToLower(toolName)+sep) {
-			return true
-		}
+	switch goos {
+	case "windows":
+		return bytes.HasPrefix(data, []byte("MZ"))
+	case "linux":
+		return bytes.HasPrefix(data, []byte{0x7f, 'E', 'L', 'F'})
+	case "darwin":
+		magic := string(data[:4])
+		return magic == "\xcf\xfa\xed\xfe" || magic == "\xfe\xed\xfa\xcf" || magic == "\xca\xfe\xba\xbe" || magic == "\xbe\xba\xfe\xca"
 	}
 	return false
-}
-
-func writeBinaryFile(r io.Reader, toolName, binPath string) error {
-	name := toolName
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	dst := filepath.Join(binPath, name)
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = io.Copy(f, r)
-	return err
 }

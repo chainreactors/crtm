@@ -25,7 +25,6 @@ var (
 	}()
 
 	defaultConfigLocation = filepath.Join(homeDir, ".config/crtm/config.yaml")
-	cacheFile             = filepath.Join(homeDir, ".config/crtm/cache.json")
 	defaultPath           = filepath.Join(homeDir, ".crtm/go/bin")
 )
 
@@ -47,8 +46,9 @@ type Options struct {
 	UpdateAll  bool
 	RemoveAll  bool
 
-	Search  goflags.StringSlice
-	AddTool string
+	Search       goflags.StringSlice
+	AddTool      string
+	AssetPattern string
 
 	Verbose            bool
 	Silent             bool
@@ -92,6 +92,7 @@ func ParseOptions() *Options {
 	flagSet.CreateGroup("catalog", "Catalog",
 		flagSet.StringSliceVarP(&options.Search, "search", "s", nil, "search tools by name, tag, or description (comma separated)", goflags.NormalizedStringSliceOptions),
 		flagSet.StringVar(&options.AddTool, "add", "", "add a custom GitHub tool (owner/repo format, e.g. ffuf/ffuf)"),
+		flagSet.StringVar(&options.AssetPattern, "asset-pattern", "{name}_{version}_{os}_{arch}.zip", "release asset pattern for -add; supports {name}, {version}, {os}, {arch}"),
 	)
 
 	flagSet.CreateGroup("debug", "Debug",

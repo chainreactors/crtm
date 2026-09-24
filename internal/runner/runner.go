@@ -1,336 +1,129 @@
 package runner
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/crtm/pkg/path"
-	"github.com/chainreactors/crtm/pkg/types"
-	"github.com/chainreactors/crtm/pkg/utils"
+	"github.com/chainreactors/crtm/pkg/registry"
 	"github.com/projectdiscovery/gologger"
-	errorutil "github.com/projectdiscovery/utils/errors"
-	osutils "github.com/projectdiscovery/utils/os"
-	"github.com/projectdiscovery/utils/syscallutil"
 )
 
-var excludedToolList = []string{"nuclei-templates"}
+// Runner is the CLI adapter for the shared Manager.
+type Runner struct{ options *Options }
 
-// Runner contains the internal logic of the program
-type Runner struct {
-	options *Options
-}
+func NewRunner(options *Options) (*Runner, error) { return &Runner{options: options}, nil }
 
-// NewRunner instance
-func NewRunner(options *Options) (*Runner, error) {
-	return &Runner{
-		options: options,
-	}, nil
-}
-
-// Run the instance
 func (r *Runner) Run() error {
-	// add default path to $PATH
 	if r.options.SetPath || r.options.Path == defaultPath {
 		if err := path.SetENV(r.options.Path); err != nil {
-			return errorutil.NewWithErr(err).Msgf(`Failed to set path: %s. Add it to $PATH and run again`, r.options.Path)
+			return err
 		}
 	}
-
 	if r.options.UnSetPath {
 		if err := path.UnsetENV(r.options.Path); err != nil {
-			return errorutil.NewWithErr(err).Msgf(`Failed to unset path: %s. Remove it from $PATH and run again`, r.options.Path)
+			return err
 		}
 	}
-
-	err := os.MkdirAll(r.options.Path, os.ModePerm)
+	mgr, err := pkg.NewManager(pkg.ManagerOption{BinPath: r.options.Path, ConfigPath: r.options.ConfigFile})
 	if err != nil {
 		return err
 	}
-	err = os.MkdirAll(filepath.Dir(r.options.ConfigFile), os.ModePerm)
-	if err != nil {
-		return err
-	}
-	mgr, mgrErr := pkg.NewManager(pkg.ManagerOption{
-		BinPath:    r.options.Path,
-		ConfigPath: r.options.ConfigFile,
-	})
-	if mgrErr != nil {
-		return mgrErr
-	}
-	if err := mgr.Refresh(); err != nil {
-		gologger.Warning().Msgf("refresh sources: %v", err)
-	}
 
-	toolList := mgr.ListTools()
-
-	if toolList != nil {
-		go func() {
-			if err := UpdateCache(toolList); err != nil {
-				gologger.Warning().Msgf("%s\n", err)
-			}
-		}()
-	} else {
-		var cacheErr error
-		toolList, cacheErr = FetchFromCache()
-		if cacheErr != nil {
-			return errors.New("failed to fetch tools from any source, and cache is unavailable")
-		}
-		if toolList != nil {
-			gologger.Warning().Msg("using cached tool list\n\n")
-			mgr = nil
-		}
-	}
-
-	// Handle search command
-	if len(r.options.Search) > 0 && mgr != nil {
+	if len(r.options.Search) > 0 {
 		for _, query := range r.options.Search {
 			results := mgr.Search(query)
 			if len(results) == 0 {
 				gologger.Info().Msgf("no tools found for %q", query)
-				continue
 			}
-			for i, t := range results {
-				source := t.Source
-				if source == "" {
-					source = t.GetOrg()
+			for i, tool := range results {
+				description := tool.Description
+				if description == "" {
+					description = strings.Join(tool.Tags, ", ")
 				}
-				desc := t.Description
-				if desc == "" && len(t.Tags) > 0 {
-					desc = strings.Join(t.Tags, ", ")
-				}
-				msg := utils.InstalledVersion(t, r.options.Path, au)
-				fmt.Printf("%d. [%s] %s %s %s\n", i+1, source, t.Name, msg, desc)
+				fmt.Printf("%d. [%s] %s %s %s\n", i+1, tool.Org(), tool.Name, installedVersion(mgr, tool.Name), description)
 			}
 		}
 		return nil
 	}
-
-	// Handle add command
 	if r.options.AddTool != "" {
-		entry := pkg.CustomToolEntry{Repo: r.options.AddTool}
-		added, addErr := pkg.AddCustomTool(r.options.ConfigFile, entry)
-		if addErr != nil {
-			return addErr
+		owner, name, ok := strings.Cut(r.options.AddTool, "/")
+		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return fmt.Errorf("custom tool must use owner/repo format")
+		}
+		entry := registry.ToolEntry{Name: name, Repo: r.options.AddTool, AssetPattern: r.options.AssetPattern}
+		added, err := mgr.AddCustomTool(entry)
+		if err != nil {
+			return err
 		}
 		if added {
-			gologger.Info().Msgf("added %s to custom tools", entry.ToolName())
+			gologger.Info().Msgf("added %s to custom tools", entry.Name)
 		} else {
 			gologger.Info().Msgf("%s already registered", entry.Repo)
 		}
 		return nil
 	}
 
-	switch {
-	case r.options.InstallAll:
-		for _, tool := range toolList {
+	for _, tool := range mgr.ListTools() {
+		switch {
+		case r.options.InstallAll:
 			r.options.Install = append(r.options.Install, tool.Name)
-		}
-	case r.options.UpdateAll:
-		for _, tool := range toolList {
+		case r.options.UpdateAll:
 			r.options.Update = append(r.options.Update, tool.Name)
-		}
-	case r.options.RemoveAll:
-		for _, tool := range toolList {
+		case r.options.RemoveAll:
 			r.options.Remove = append(r.options.Remove, tool.Name)
 		}
 	}
-	gologger.Verbose().Msgf("using path %s", r.options.Path)
-
-	findTool := func(name string) (types.Tool, bool) {
-		if mgr != nil && mgr.Catalog() != nil {
-			return mgr.Catalog().Find(name)
-		}
-		if i, ok := utils.Contains(toolList, name); ok {
-			return toolList[i], true
-		}
-		return types.Tool{}, false
-	}
-
-	for _, toolName := range r.options.Install {
-		if !path.IsSubPath(homeDir, r.options.Path) {
-			gologger.Error().Msgf("skipping install outside home folder: %s", toolName)
-			continue
-		}
-		if tool, ok := findTool(toolName); ok {
-			if err := pkg.Install(r.options.Path, tool); err != nil {
-				if errors.Is(err, types.ErrIsInstalled) {
-					gologger.Info().Msgf("%s: %s", tool.Name, err)
-				} else {
-					gologger.Error().Msgf("error while installing %s: %s", tool.Name, err)
-				}
-			}
-			printRequirementInfo(tool)
-		} else {
-			gologger.Error().Msgf("error while installing %s: %s not found in the list", toolName, toolName)
-		}
-	}
-	for _, toolName := range r.options.Update {
-		if !path.IsSubPath(homeDir, r.options.Path) {
-			gologger.Error().Msgf("skipping update outside home folder: %s", toolName)
-			continue
-		}
-		if tool, ok := findTool(toolName); ok {
-			if err := pkg.Update(r.options.Path, tool, r.options.DisableChangeLog); err != nil {
-				if err == types.ErrIsUpToDate {
-					gologger.Info().Msgf("%s: %s", toolName, err)
-				} else {
-					gologger.Info().Msgf("%s\n", err)
-				}
-			}
-		}
-	}
-	for _, toolName := range r.options.Remove {
-		if !path.IsSubPath(homeDir, r.options.Path) {
-			gologger.Error().Msgf("skipping remove outside home folder: %s", toolName)
-			continue
-		}
-		if tool, ok := findTool(toolName); ok {
-			if err := pkg.Remove(r.options.Path, tool); err != nil {
-				var notFoundError *exec.Error
-				if errors.As(err, &notFoundError) {
-					gologger.Info().Msgf("%s: not found", toolName)
-				} else {
-					gologger.Info().Msgf("%s\n", err)
-				}
-			}
-		}
-	}
 	if len(r.options.Install) == 0 && len(r.options.Update) == 0 && len(r.options.Remove) == 0 {
-		return r.ListToolsAndEnv(toolList)
+		return r.ListToolsAndEnv(mgr)
 	}
-	return nil
-}
-
-func isGoInstalled() bool {
-	cmd := exec.Command("go", "version")
-	if err := cmd.Run(); err != nil {
-		return false
+	if !path.IsSubPath(homeDir, r.options.Path) {
+		return fmt.Errorf("binary path must be within the home directory: %s", r.options.Path)
 	}
-	return true
-}
-
-func printRequirementInfo(tool types.Tool) {
-	specs := getSpecs(tool)
-
-	printTitle := true
-	stringBuilder := &strings.Builder{}
-	for _, spec := range specs {
-		if requirementSatisfied(spec.Name) {
-			continue
-		}
-		if printTitle {
-			stringBuilder.WriteString(fmt.Sprintf("%s\n", au.Bold(tool.Name+" requirements:").String()))
-			printTitle = false
-		}
-		instruction := getFormattedInstruction(spec)
-		isRequired := getRequirementStatus(spec)
-		stringBuilder.WriteString(fmt.Sprintf("%s %s\n", isRequired, instruction))
-	}
-	if stringBuilder.Len() > 0 {
-		gologger.Info().Msgf("%s", stringBuilder.String())
-	}
-}
-
-func getRequirementStatus(spec types.ToolRequirementSpecification) string {
-	if spec.Required {
-		return au.Yellow("required").String()
-	}
-	return au.BrightGreen("optional").String()
-}
-
-func getFormattedInstruction(spec types.ToolRequirementSpecification) string {
-	return strings.Replace(spec.Instruction, "$CMD", spec.Command, 1)
-}
-
-func getSpecs(tool types.Tool) []types.ToolRequirementSpecification {
-	var specs []types.ToolRequirementSpecification
-	for _, requirement := range tool.Requirements {
-		if requirement.OS == runtime.GOOS {
-			specs = append(specs, requirement.Specification...)
-		}
-	}
-	return specs
-}
-
-// UpdateCache creates/updates cache file
-func UpdateCache(toolList []types.Tool) error {
-	b, err := json.Marshal(toolList)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(cacheFile, b, os.ModePerm)
-}
-
-// FetchFromCache loads tool list from cache file
-func FetchFromCache() ([]types.Tool, error) {
-	b, err := os.ReadFile(cacheFile)
-	if err != nil {
-		return nil, err
-	}
-	var toolList []types.Tool
-	if err := json.Unmarshal(b, &toolList); err != nil {
-		return nil, err
-	}
-	return toolList, nil
-}
-
-// ListToolsAndEnv prints the list of tools
-func (r *Runner) ListToolsAndEnv(tools []types.Tool) error {
-	gologger.Info().Msgf(path.GetOsData() + "\n")
-	gologger.Info().Msgf("Path to download project binary: %s\n", r.options.Path)
-	var fmtMsg string
-	if path.IsSet(r.options.Path) {
-		fmtMsg = "Path %s configured in environment variable $PATH\n"
-	} else {
-		fmtMsg = "Path %s not configured in environment variable $PATH\n"
-	}
-	gologger.Info().Msgf(fmtMsg, r.options.Path)
-
-	for i, tool := range tools {
-		msg := utils.InstalledVersion(tool, r.options.Path, au)
-		source := tool.Source
-		if source == "" {
-			source = tool.GetOrg()
-		}
-		fmt.Printf("%d. [%s] %s %s\n", i+1, source, tool.Name, msg)
-	}
-	return nil
-}
-
-// Close the runner instance
-func (r *Runner) Close() {}
-
-func requirementSatisfied(requirementName string) bool {
-	if strings.HasPrefix(requirementName, "lib") {
-		libNames := appendLibExtensionForOS(requirementName)
-		for _, libName := range libNames {
-			_, sysErr := syscallutil.LoadLibrary(libName)
-			if sysErr == nil {
-				return true
+	var failures []error
+	for _, action := range []struct {
+		names []string
+		run   func(string) error
+	}{
+		{r.options.Install, mgr.InstallTool},
+		{r.options.Update, mgr.UpdateTool},
+		{r.options.Remove, mgr.RemoveTool},
+	} {
+		for _, name := range action.names {
+			if err := action.run(name); err != nil {
+				failures = append(failures, fmt.Errorf("%s: %w", name, err))
 			}
 		}
-		return false
 	}
-	_, execErr := exec.LookPath(requirementName)
-	return execErr == nil
+	for _, name := range r.options.Install {
+		if tool, ok := mgr.Catalog().Find(name); ok && mgr.IsInstalled(name) && tool.Hint != "" {
+			gologger.Info().Msgf("%s: %s", tool.Name, tool.Hint)
+		}
+	}
+	return errors.Join(failures...)
 }
 
-func appendLibExtensionForOS(lib string) []string {
-	switch {
-	case osutils.IsWindows():
-		return []string{fmt.Sprintf("%s.dll", lib), lib}
-	case osutils.IsLinux():
-		return []string{fmt.Sprintf("%s.so", lib), lib}
-	case osutils.IsOSX():
-		return []string{fmt.Sprintf("%s.dylib", lib), lib}
-	default:
-		return []string{lib}
+func installedVersion(mgr *pkg.Manager, name string) string {
+	if version := mgr.InstalledVersion(name); version != "" {
+		return "[installed: " + version + "]"
 	}
+	return "[not installed]"
 }
+
+func (r *Runner) ListToolsAndEnv(mgr *pkg.Manager) error {
+	gologger.Info().Msg(path.GetOsData())
+	gologger.Info().Msgf("Path to download project binary: %s", r.options.Path)
+	if path.IsSet(r.options.Path) {
+		gologger.Info().Msgf("Path %s configured in environment variable $PATH", r.options.Path)
+	} else {
+		gologger.Info().Msgf("Path %s not configured in environment variable $PATH", r.options.Path)
+	}
+	for i, tool := range mgr.ListTools() {
+		fmt.Printf("%d. [%s] %s %s\n", i+1, tool.Org(), tool.Name, installedVersion(mgr, tool.Name))
+	}
+	return nil
+}
+
+func (r *Runner) Close() {}
